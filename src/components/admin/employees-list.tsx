@@ -18,9 +18,9 @@ type EmployeeRow = {
 }
 
 function EmployeeCard({ employee, isCurrentUser }: { employee: EmployeeRow; isCurrentUser: boolean }) {
-	const action = employee.is_active
-		? deactivateEmployee.bind(null, employee.id)
-		: activateEmployee.bind(null, employee.id)
+	const action = async (_formData: FormData) => {
+		await (employee.is_active ? deactivateEmployee(employee.id) : activateEmployee(employee.id))
+	}
 
 	return (
 		<Card className="rounded-2xl border border-neutral-200 bg-white py-0 shadow-sm shadow-emerald-950/5">

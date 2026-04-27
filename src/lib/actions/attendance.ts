@@ -65,12 +65,12 @@ async function updateClockTime(
 	}
 
 	const employeeResult = await getCurrentEmployeeId(supabase, user.id)
-	if ('error' in employeeResult) {
+	if (!('employeeId' in employeeResult)) {
 		return employeeResult
 	}
 
 	const assignmentResult = await getAssignmentForEmployee(supabase, appointmentEmployeeId, employeeResult.employeeId)
-	if ('error' in assignmentResult) {
+	if (!('assignment' in assignmentResult)) {
 		return assignmentResult
 	}
 

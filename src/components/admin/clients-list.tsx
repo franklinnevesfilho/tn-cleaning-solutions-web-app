@@ -31,7 +31,9 @@ function shortNotes(notes: string | null) {
 }
 
 function ClientCard({ client, archived }: { client: ClientWithLocationCount; archived?: boolean }) {
-	const action = archived ? restoreClient.bind(null, client.id) : archiveClient.bind(null, client.id)
+	const action = async (_formData: FormData) => {
+		await (archived ? restoreClient(client.id) : archiveClient(client.id))
+	}
 	const locationCount = getLocationCount(client)
 	return (
 		<Card className="rounded-2xl border border-neutral-200 bg-white py-0 shadow-sm shadow-emerald-950/5">

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { useActionState, useEffect, useMemo, useState } from 'react'
+import { Suspense, useActionState, useEffect, useMemo, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import {
 	ArrowRight,
@@ -264,7 +264,7 @@ function CompleteProfileForm() {
 	)
 }
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
 	const searchParams = useSearchParams()
 	const supabase = useMemo(() => createClient(), [])
 	const [step, setStep] = useState<Step>('verifying')
@@ -524,5 +524,13 @@ export default function AcceptInvitePage() {
 				</div>
 			</div>
 		</div>
+	)
+}
+
+export default function AcceptInvitePage() {
+	return (
+		<Suspense>
+			<AcceptInviteContent />
+		</Suspense>
 	)
 }
