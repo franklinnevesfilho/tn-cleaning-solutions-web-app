@@ -1,0 +1,23 @@
+-- Admin User Setup
+-- 
+-- ⚠️  IMPORTANT: You cannot create Supabase Auth users by directly inserting into auth.users
+-- Supabase Auth uses its own password hashing that's incompatible with PostgreSQL's crypt()
+--
+-- To create admin users and test data, run the seed script:
+--   npm run seed:admin
+--
+-- This will create the following users with proper password hashing:
+-- - franklin.neves.filho@gmail.com (admin) / password: admin123
+-- - franklin.neves.filho+employee@gmail.com (employee) / password: employee123
+-- - sarah.johnson@tncleaningsolutions.com (employee) / password: employee123
+--
+-- It will also create test appointment data for development:
+-- - Johnson Family (test client)
+-- - Standard House Cleaning (test job)
+-- - Today's appointment at 9:00 AM - 11:00 AM
+-- - Both employees assigned to the appointment
+--
+-- The script handles both creating new users and updating existing ones.
+-- It also creates the corresponding employee records automatically.
+--
+-- 🔒 SECURITY WARNING: Change these default passwords immediately in production!
