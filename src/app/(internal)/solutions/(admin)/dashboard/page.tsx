@@ -288,9 +288,6 @@ export default async function DashboardPage() {
                 <h1 className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold tracking-tight text-white">
                     {getGreeting()}, {formatLongDate(todayDate)}
                 </h1>
-                <p className="mt-2 max-w-2xl text-xs sm:text-sm text-emerald-100/85">
-                    Stay ahead of today&apos;s workload, monitor billing health, and keep your team on track.
-                </p>
             </section>
 
             {loadError ? (
@@ -309,7 +306,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="mt-4 text-2xl sm:text-3xl font-bold tracking-tight text-neutral-950">{todayAppointmentsCount}</p>
                     <p className="mt-1 text-xs sm:text-sm font-medium text-neutral-700">Today&apos;s Appointments</p>
-                    <p className="mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Scheduled and in-progress jobs for today.</p>
+                    <p className="hidden md:flex mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Scheduled and in-progress jobs for today.</p>
                 </Link>
 
                 <Link
@@ -328,7 +325,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="mt-2 sm:mt-4 text-2xl sm:text-3xl font-bold tracking-tight text-neutral-950">{openInvoicesCount}</p>
                     <p className="mt-1 text-xs sm:text-sm font-medium text-neutral-700">Open Invoices</p>
-                    <p className="mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Issued invoices pending payment.</p>
+                    <p className="hidden md:flex mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Issued invoices pending payment.</p>
                 </Link>
 
                 <Link
@@ -342,7 +339,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="mt-4 text-2xl sm:text-3xl font-bold tracking-tight text-neutral-950">{overdueInvoicesCount}</p>
                     <p className="mt-1 text-xs sm:text-sm font-medium text-neutral-700">Overdue Invoices</p>
-                    <p className="mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Needs follow-up for late payment.</p>
+                    <p className="hidden md:flex mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Needs follow-up for late payment.</p>
                 </Link>
 
                 <Link
@@ -356,7 +353,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="mt-4 text-2xl sm:text-3xl font-bold tracking-tight text-neutral-950">{activeClientsCount}</p>
                     <p className="mt-1 text-xs sm:text-sm font-medium text-neutral-700">Active Clients</p>
-                    <p className="mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Clients available for new bookings.</p>
+                    <p className="hidden md:flex mt-1 text-[10px] sm:text-xs text-neutral-500 leading-snug">Clients available for new bookings.</p>
                 </Link>
             </section>
 

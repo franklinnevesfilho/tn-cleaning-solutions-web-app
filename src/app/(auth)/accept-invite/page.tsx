@@ -275,6 +275,38 @@ export default function AcceptInvitePage() {
 		let cancelled = false
 
 		const verifyInvite = async () => {
+			// First check URL hash for implicit flow tokens (local Supabase dev)
+			const hash = typeof window !== 'undefined' ? window.location.hash.substring(1) : ''
+			const hashParams = new URLSearchParams(hash)
+			const hashAccessToken = hashParams.get('access_token')
+			const hashRefreshToken = hashParams.get('refresh_token')
+			const hashType = hashParams.get('type')
+
+			if (hashAccessToken && hashRefreshToken && hashType === 'invite') {
+				// Implicit flow: session tokens already in hash — set the session directly
+				const { error: sessionError } = await supabase.auth.setSession({
+					access_token: hashAccessToken,
+					refresh_token: hashRefreshToken,
+				})
+
+				if (cancelled) return
+
+				if (sessionError) {
+					setError(sessionError.message || 'This invite link is invalid or expired.')
+					setStep('error')
+					return
+				}
+
+				// Clean hash from URL without reloading
+				if (typeof window !== 'undefined') {
+					window.history.replaceState(null, '', window.location.pathname)
+				}
+
+				setStep('set-password')
+				return
+			}
+
+			// Fallback: PKCE flow — token_hash in query param
 			const tokenHash = searchParams.get('token_hash')
 
 			if (!tokenHash) {

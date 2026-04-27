@@ -45,13 +45,6 @@ const users: User[] = [
     role: 'admin',
   },
   {
-    email: 'franklin.neves.filho+employee@gmail.com',
-    password: 'employee123',
-    fullName: 'Franklin Neves Filho',
-    role: 'employee',
-    phone: '(615) 555-0100',
-  },
-  {
     email: 'sarah.johnson@tncleaningsolutions.com',
     password: 'employee123',
     fullName: 'Sarah Johnson',
@@ -153,7 +146,6 @@ async function seedUsers() {
   console.log('   Admin:')
   console.log('   - franklin.neves.filho@gmail.com / admin123')
   console.log('\n   Employees:')
-  console.log('   - franklin.neves.filho+employee@gmail.com / employee123')
   console.log('   - sarah.johnson@tncleaningsolutions.com / employee123')
   console.log('\n⚠️  SECURITY WARNING:')
   console.log('   Change default passwords immediately in production!')
@@ -165,7 +157,7 @@ async function seedTestData() {
   // Get employee IDs
   const { data: franklinUser } = await supabase.auth.admin.listUsers()
   const franklinAuthUser = franklinUser?.users.find(
-    (u) => u.email === 'franklin.neves.filho+employee@gmail.com'
+    (u) => u.email === 'franklin.neves.filho@gmail.com'
   )
   const sarahAuthUser = franklinUser?.users.find(
     (u) => u.email === 'sarah.johnson@tncleaningsolutions.com'
@@ -176,19 +168,13 @@ async function seedTestData() {
     return
   }
 
-  const { data: franklinEmployee } = await supabase
-    .from('employees')
-    .select('id')
-    .eq('user_id', franklinAuthUser.id)
-    .single()
-
   const { data: sarahEmployee } = await supabase
     .from('employees')
     .select('id')
     .eq('user_id', sarahAuthUser.id)
     .single()
 
-  if (!franklinEmployee || !sarahEmployee) {
+  if (!sarahEmployee) {
     console.log('   ⚠️  Skipping test data - employee records not found')
     return
   }
@@ -296,25 +282,6 @@ async function seedTestData() {
     console.log(`   ✅ Created test appointment for today (${today}) at 9:00 AM`)
   } else {
     console.log(`   ℹ️  Using existing test appointment for today (${today})`)
-  }
-
-  // Assign both employees to the appointment
-  const { error: franklinAssignError } = await supabase
-    .from('appointment_employees')
-    .insert({
-      appointment_id: appointment?.id,
-      employee_id: franklinEmployee.id,
-    })
-
-  if (franklinAssignError && franklinAssignError.code !== '23505') {
-    // Ignore duplicate key errors
-    console.error(
-      `   ⚠️  Failed to assign Franklin: ${franklinAssignError.message}`
-    )
-  } else if (franklinAssignError?.code === '23505') {
-    console.log('   ℹ️  Franklin already assigned')
-  } else {
-    console.log('   ✅ Assigned Franklin to appointment')
   }
 
   const { error: sarahAssignError } = await supabase

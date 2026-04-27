@@ -144,7 +144,7 @@ export async function inviteEmployee(
 
   try {
     const adminClient = createAdminClient()
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://127.0.0.1:3000'
     const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
       parsed.data.email,
       {

@@ -24,6 +24,8 @@ async function loginAction(
 
     const email = String(formData.get('email') ?? '').trim()
     const password = String(formData.get('password') ?? '')
+    console.log('Login attempt with email:', email) // Debug log
+    console.log('Password provided:', password) // Debug log to check if password is provided
 
     const fieldErrors: LoginActionState['fieldErrors'] = {}
 
@@ -51,6 +53,7 @@ async function loginAction(
     })
 
     if (error) {
+        console.log('Authentication error:', error) // Debug log to check authentication error
         return {
             error: 'Invalid email or password.',
             fieldErrors: {},
