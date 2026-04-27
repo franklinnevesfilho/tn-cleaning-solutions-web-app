@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/browser'
 
 import { completeProfile, type CompleteProfileState } from './actions'
+import { PasswordInput } from '@/components/ui/password-input'
 
 type Step = 'verifying' | 'set-password' | 'complete-profile' | 'error'
 
@@ -133,10 +134,9 @@ function SetPasswordForm({
 				<Label htmlFor="password" className="text-sm font-medium text-neutral-700">
 					Create password
 				</Label>
-				<Input
+				<PasswordInput
 					id="password"
 					name="password"
-					type="password"
 					autoComplete="new-password"
 					required
 					value={password}
@@ -153,10 +153,9 @@ function SetPasswordForm({
 				>
 					Confirm password
 				</Label>
-				<Input
+				<PasswordInput
 					id="confirmPassword"
 					name="confirmPassword"
-					type="password"
 					autoComplete="new-password"
 					required
 					value={confirmPassword}
@@ -275,6 +274,12 @@ export default function AcceptInvitePage() {
 		let cancelled = false
 
 		const verifyInvite = async () => {
+			const { data: { user: existingUser } } = await supabase.auth.getUser()
+			if (existingUser) {
+				if (!cancelled) setStep('set-password')
+				return
+			}
+
 			// First check URL hash for implicit flow tokens (local Supabase dev)
 			const hash = typeof window !== 'undefined' ? window.location.hash.substring(1) : ''
 			const hashParams = new URLSearchParams(hash)
