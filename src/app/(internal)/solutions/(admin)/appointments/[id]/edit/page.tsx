@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
+import type { PostgrestError } from '@supabase/supabase-js'
 
 import { AppointmentForm } from '@/components/admin/appointment-form'
 import { createClient } from '@/lib/supabase/server'
@@ -9,11 +10,20 @@ type EditAppointmentPageProps = {
   params: Promise<{ id: string }>
 }
 
+type RecurrenceSeriesRow = {
+  id: string
+  frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly'
+  start_date: string
+  end_date: string | null
+  max_occurrences: number | null
+}
+
 type AppointmentRow = {
   id: string
   client_id: string
   job_id: string
   location_id: string | null
+  recurrence_series_id: string | null
   scheduled_date: string
   scheduled_start_time: string
   scheduled_end_time: string
@@ -38,7 +48,7 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
       .from('appointments')
       .select(
         `
-          id, client_id, job_id, location_id, scheduled_date, scheduled_start_time,
+          id, client_id, job_id, location_id, recurrence_series_id, scheduled_date, scheduled_start_time,
           scheduled_end_time, price_override_cents, notes, status, is_archived,
           appointment_employees(employee_id)
         `
@@ -67,7 +77,38 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
     notFound()
   }
 
-  const loadError = clientsError ?? jobsError ?? employeesError
+  const typedAppointment: AppointmentRow = appointment
+  let recurrenceSeries: RecurrenceSeriesRow | null = null
+  let recurrenceSeriesError: PostgrestError | null = null
+
+  if (typedAppointment.recurrence_series_id) {
+    const { data, error } = await supabase
+      .from('recurrence_series')
+      .select('id, frequency, start_date, end_date, max_occurrences')
+      .eq('id', typedAppointment.recurrence_series_id)
+      .neq('is_archived', true)
+      .maybeSingle()
+
+    recurrenceSeries = data as RecurrenceSeriesRow | null
+    recurrenceSeriesError = error
+  }
+
+  const loadError = clientsError ?? jobsError ?? employeesError ?? recurrenceSeriesError
+
+  const appointmentFormAppointment = {
+    id: typedAppointment.id,
+    client_id: typedAppointment.client_id,
+    job_id: typedAppointment.job_id,
+    location_id: typedAppointment.location_id,
+    recurrence_series_id: recurrenceSeries?.id ?? typedAppointment.recurrence_series_id,
+    scheduled_date: typedAppointment.scheduled_date,
+    scheduled_start_time: typedAppointment.scheduled_start_time,
+    scheduled_end_time: typedAppointment.scheduled_end_time,
+    price_override_cents: typedAppointment.price_override_cents,
+    notes: typedAppointment.notes,
+    status: typedAppointment.status,
+    assignedEmployeeIds: (typedAppointment.appointment_employees ?? []).map((row) => row.employee_id),
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -81,7 +122,7 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
             Back to Appointment
           </Link>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-neutral-950">Edit Appointment</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-neutral-950">Edit Appointments</h1>
             <p className="mt-2 text-sm text-neutral-600">Update schedule details and team assignments.</p>
           </div>
         </div>
@@ -90,6 +131,10 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
       {loadError ? (
         <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {loadError.message}
+        </section>
+      ) : typedAppointment.status === 'completed' || typedAppointment.status === 'cancelled' ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          This appointment cannot be edited because it has already been {typedAppointment.status}.
         </section>
       ) : (
         <AppointmentForm
@@ -106,19 +151,8 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
           }))}
           jobs={jobs ?? []}
           employees={employees ?? []}
-          appointment={{
-            id: appointment.id,
-            client_id: appointment.client_id,
-            job_id: appointment.job_id,
-            location_id: appointment.location_id,
-            scheduled_date: appointment.scheduled_date,
-            scheduled_start_time: appointment.scheduled_start_time,
-            scheduled_end_time: appointment.scheduled_end_time,
-            price_override_cents: appointment.price_override_cents,
-            notes: appointment.notes,
-            status: appointment.status,
-            assignedEmployeeIds: (appointment.appointment_employees ?? []).map((row) => row.employee_id),
-          }}
+          appointment={appointmentFormAppointment}
+          recurrenceSeries={recurrenceSeries ?? null}
         />
       )}
     </div>
