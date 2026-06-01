@@ -9,24 +9,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
 
-export type LoginActionState = {
+export type PasswordResetActionState = {
   error: string | null
   fieldErrors: {
     email?: string
-    password?: string
   }
 }
 
-const initialState: LoginActionState = {
+const initialState: PasswordResetActionState = {
   error: null,
   fieldErrors: {},
 }
 
-type LoginFormProps = {
+type PasswordResetFormProps = {
   action: (
-    previousState: LoginActionState,
+    previousState: PasswordResetActionState,
     formData: FormData
-  ) => Promise<LoginActionState>
+  ) => Promise<PasswordResetActionState>
 }
 
 function SubmitButton() {
@@ -38,12 +37,12 @@ function SubmitButton() {
       disabled={pending}
       className="h-11 w-full rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(5,150,105,0.18)] transition-all hover:bg-emerald-700 hover:shadow-[0_16px_34px_rgba(5,150,105,0.22)]"
     >
-      {pending ? 'Signing in...' : 'Sign in'}
+      {pending ? 'Sending Reset Email...' : 'Reset Password'}
     </Button>
   )
 }
 
-export function LoginForm({ action }: LoginFormProps) {
+export function PasswordResetForm({ action }: PasswordResetFormProps) {
   const [state, formAction] = useActionState(action, initialState)
 
   return (
@@ -81,41 +80,8 @@ export function LoginForm({ action }: LoginFormProps) {
         )}
       </div>
 
-      <div className="space-y-1.5">
-        <Label
-          htmlFor="password"
-          className="text-sm font-medium text-neutral-700"
-        >
-          Password
-        </Label>
-        <PasswordInput
-          id="password"
-          name="password"
-          autoComplete="current-password"
-          required
-          aria-invalid={Boolean(state.fieldErrors.password)}
-          aria-describedby={state.fieldErrors.password ? 'password-error' : undefined}
-          className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
-          placeholder="Enter your password"
-        />
-        {state.fieldErrors.password && (
-          <p id="password-error" className="text-xs text-red-600">
-            {state.fieldErrors.password}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center justify-end pt-0.5">
-        <Link
-          href="/reset-password-request"
-          className="text-sm font-medium text-emerald-700 transition-colors hover:text-emerald-800"
-        >
-          Forgot password?
-        </Link>
-      </div>
-
       <SubmitButton />
-
+      
       <p className="text-center text-xs leading-relaxed text-neutral-500">
         Need access? Contact your operations lead.
       </p>

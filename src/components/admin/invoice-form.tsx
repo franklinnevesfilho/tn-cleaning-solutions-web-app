@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useActionState, useEffect, useMemo, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 
@@ -91,6 +92,13 @@ export function InvoiceForm({
   const isEditMode = Boolean(invoice)
   const serverAction = invoice ? updateInvoice.bind(null, invoice.id) : createInvoice
   const [state, formAction] = useActionState(serverAction, initialState)
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!isEditMode && state.success) {
+      router.push('/solutions/invoices')
+    }
+  }, [isEditMode, state.success, router])
 
   const allAppointments = useMemo(() => {
     const map = new Map<string, AppointmentOption>()

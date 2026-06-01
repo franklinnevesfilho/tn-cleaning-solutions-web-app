@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { format } from 'date-fns'
-import { ArrowLeft, Clock, Pencil } from 'lucide-react'
+import { ArrowLeft, Clock, Pencil, Trash } from 'lucide-react'
 import { notFound } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
@@ -8,14 +8,6 @@ import { createClient } from '@/lib/supabase/server'
 
 type EmployeeDetailPageProps = {
 	params: Promise<{ id: string }>
-}
-
-type EmployeeRow = {
-	id: string
-	full_name: string
-	phone: string | null
-	is_active: boolean
-	is_archived: boolean
 }
 
 type AppointmentActivity = {
@@ -50,14 +42,14 @@ export default async function EmployeeDetailPage({ params }: EmployeeDetailPageP
 	const supabase = await createClient()
 
 	const [{ data: employee, error: employeeError }, { data: activity, error: activityError }] =
-		await Promise.all([
-			supabase
-				.from('employees')
-				.select('id, full_name, phone, is_active, is_archived')
-				.eq('id', id)
-				.maybeSingle(),
-			supabase
-				.from('appointment_employees')
+  		await Promise.all([
+  		  supabase
+  		    .from('employees')
+  		    .select('id, full_name, phone, is_active, is_archived, user_id') // add user_id
+  		    .eq('id', id)
+  		    .maybeSingle(),
+  		  supabase
+  		    .from('appointment_employees')
 				.select(
 					`
 						clocked_in_at,
@@ -78,6 +70,11 @@ export default async function EmployeeDetailPage({ params }: EmployeeDetailPageP
 	if (employeeError || !employee || employee.is_archived) {
 		notFound()
 	}
+
+	// Now fetch email using the user_id
+	const { data: email } = await supabase.rpc('get_user_email', {
+	  user_id: employee.user_id,
+	})
 
 	const recentActivity = (activity ?? []) as unknown as AppointmentActivity[]
 
@@ -110,18 +107,32 @@ export default async function EmployeeDetailPage({ params }: EmployeeDetailPageP
 						</div>
 					</div>
 
-					<Link href={`/solutions/employees/${employee.id}/edit`}>
-						<Button className="h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700">
-							<Pencil className="size-4" aria-hidden="true" />
-							Edit Employee
+					<div className="flex flex-col">
+						<Link 
+						href={`/solutions/employees/${employee.id}/edit`}>
+							<Button className="w-full h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700">
+								<Pencil className="size-4" aria-hidden="true" />
+								Edit Employee
+							</Button>
+						</Link>
+						<Button 
+							className={`mt-2 h-10 rounded-full border border-red-200 bg-red-50 px-5 text-sm font-semibold text-red-700 hover:bg-red-100 ${employee.is_archived ? 'cursor-not-allowed opacity-50' : ''}`}
+							disabled={employee.is_archived}
+						>
+							<Trash className="size-4" aria-hidden="true" />
+							Archive
 						</Button>
-					</Link>
+					</div>
 				</div>
 			</section>
 
 			<section className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm shadow-emerald-950/5">
 				<h2 className="text-lg font-semibold text-neutral-950">Contact</h2>
-				<div className="mt-4 grid gap-4 sm:grid-cols-2">
+				<div className="mt-4 grid gap-4 sm:grid-cols-3">
+					<div>
+						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Email</p>
+						<p className="mt-1 text-sm text-neutral-700">{email ?? 'No email on file'}</p>
+					</div>
 					<div>
 						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Phone</p>
 						<p className="mt-1 text-sm text-neutral-700">{employee.phone || 'No phone on file'}</p>

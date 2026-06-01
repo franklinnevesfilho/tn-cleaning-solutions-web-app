@@ -305,3 +305,26 @@ export async function activateEmployee(id: string): Promise<EmployeeActionResult
   revalidatePath(`/solutions/employees/${id}`)
   return { success: true }
 }
+
+// send password reset email
+export async function sendPasswordResetEmail(employeeEmail: string): Promise<EmployeeActionResult> {
+  if (!employeeEmail) {
+    return { success: false, error: 'Employee email is required.' }
+  }
+
+  const authResult = await requireAdminRole()
+  if (!authResult.success) {
+    return { success: false, error: authResult.error }
+  }
+
+  try {
+    const adminClient = createAdminClient()
+    await adminClient.auth.resetPasswordForEmail(employeeEmail, {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://127.0.0.1:3000'}/reset-password`,
+    })
+  } catch {
+    return { success: false, error: 'Failed to send password reset email.' }
+  }
+
+  return { success: true }
+}
