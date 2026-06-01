@@ -30,14 +30,22 @@ type AppointmentFormProps = {
     client_id: string
     job_id: string
     location_id: string | null
+    recurrence_series_id: string | null
     scheduled_date: string
     scheduled_start_time: string
     scheduled_end_time: string
     price_override_cents: number | null
     notes: string
-    status: string
+    status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
     assignedEmployeeIds: string[]
   }
+  recurrenceSeries?: {
+    id: string
+    frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly'
+    start_date: string
+    end_date: string | null
+    max_occurrences: number | null
+  } | null
 }
 
 const initialState: AppointmentActionResult = {
@@ -59,7 +67,14 @@ function SubmitButton({ isEditMode }: { isEditMode: boolean }) {
   )
 }
 
-export function AppointmentForm({ clients, jobs, employees, defaultDate, appointment }: AppointmentFormProps) {
+export function AppointmentForm({
+  clients,
+  jobs,
+  employees,
+  defaultDate,
+  appointment,
+  recurrenceSeries,
+}: AppointmentFormProps) {
   const serverAction = appointment ? updateAppointment.bind(null, appointment.id) : createAppointment
   const [state, formAction] = useActionState(serverAction, initialState)
 
@@ -68,6 +83,10 @@ export function AppointmentForm({ clients, jobs, employees, defaultDate, appoint
   const [selectedJobId, setSelectedJobId] = useState(appointment?.job_id ?? jobs[0]?.id ?? '')
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>(appointment?.assignedEmployeeIds ?? [])
   const [isRecurring, setIsRecurring] = useState(false)
+  const [editScope, setEditScope] = useState<'occurrence' | 'future'>('occurrence')
+
+  const isEditingRecurringAppointment = Boolean(appointment?.recurrence_series_id && recurrenceSeries)
+  const showRecurringEditFields = editScope === 'future'
 
   const clientOptions = useMemo(
     () => clients.map((client) => ({ value: client.id, label: client.name })),
@@ -360,6 +379,117 @@ export function AppointmentForm({ clients, jobs, employees, defaultDate, appoint
                     type="number"
                     min="1"
                     step="1"
+                    className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm"
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : isEditingRecurringAppointment && recurrenceSeries ? (
+          <div className="space-y-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+            <input type="hidden" name="recurrence_series_id" value={recurrenceSeries.id} />
+
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-neutral-700">Recurrence Settings</p>
+
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="radio"
+                  name="edit_scope"
+                  value="occurrence"
+                  checked={editScope === 'occurrence'}
+                  onChange={(event) => setEditScope(event.target.value as 'occurrence' | 'future')}
+                  className="mt-0.5 size-4 border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium text-neutral-700">This appointment only</span>
+                  <span className="text-xs text-neutral-500 mt-0.5">Update only this appointment&apos;s details</span>
+                </span>
+              </label>
+
+              {/* <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="radio"
+                  name="edit_scope"
+                  value="series"
+                  checked={editScope === 'series'}
+                  onChange={(event) => setEditScope(event.target.value as 'occurrence' | 'series' | 'future')}
+                  className="mt-0.5 size-4 border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium text-neutral-700">Series settings (frequency & schedule)</span>
+                  <span className="text-xs text-neutral-500 mt-0.5">Update the recurrence pattern for the whole series</span>
+                </span>
+              </label> */}
+
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="radio"
+                  name="edit_scope"
+                  value="future"
+                  checked={editScope === 'future'}
+                  onChange={(event) => setEditScope(event.target.value as 'occurrence' | 'future')}
+                  className="mt-0.5 size-4 border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium text-neutral-700">This and all future appointments</span>
+                  <span className="text-xs text-neutral-500 mt-0.5">Update this and all upcoming pending appointments</span>
+                </span>
+              </label>
+            </div>
+
+            {/* {editScope === 'series' && recurrenceSeries ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                Only the recurrence pattern will be updated. Changes to date, time, and other fields will be
+                ignored in this mode.
+              </div>
+            ) : null} */}
+
+            {showRecurringEditFields ? (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="recurrence_frequency" className="text-sm font-medium text-neutral-700">
+                    Frequency
+                  </Label>
+                  <select
+                    id="recurrence_frequency"
+                    name="recurrence_frequency"
+                    defaultValue={recurrenceSeries.frequency}
+                    required={showRecurringEditFields}
+                    className="h-11 w-full rounded-xl border border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Biweekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="recurrence_end_date" className="text-sm font-medium text-neutral-700">
+                    End Date
+                  </Label>
+                  <Input
+                    id="recurrence_end_date"
+                    name="recurrence_end_date"
+                    type="date"
+                    defaultValue={recurrenceSeries.end_date ?? ''}
+                    className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="recurrence_max_occurrences" className="text-sm font-medium text-neutral-700">
+                    Max Occurrences
+                  </Label>
+                  <Input
+                    id="recurrence_max_occurrences"
+                    name="recurrence_max_occurrences"
+                    type="number"
+                    min="1"
+                    step="1"
+                    defaultValue={recurrenceSeries.max_occurrences ?? ''}
                     className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm"
                     placeholder="Optional"
                   />

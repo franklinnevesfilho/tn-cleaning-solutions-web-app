@@ -21,6 +21,30 @@
 - timestamp: 2026-04-24
 - author: GitHub Copilot
 
+## Appointment Edit Page Blocks Terminal Statuses and Preloads Recurrence Identity — 2026-06-01
+
+### Facts
+- The admin appointment edit page now selects `recurrence_series_id` from `appointments` and conditionally loads the linked `recurrence_series` row when present in [src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx](../src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx).
+- The page shows an inline amber notice instead of the edit form when the appointment status is `completed` or `cancelled` in [src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx](../src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx).
+- The page currently threads `recurrence_series_id` forward through the prepared appointment object passed to `AppointmentForm`, without expanding `AppointmentFormProps` yet, in [src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx](../src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx).
+
+### Inferences
+- Phase 2 is expected to widen the form contract so recurrence metadata can be used directly in the edit UI.
+
+### Decision
+- Treat `completed` and `cancelled` appointments as non-editable in the page layer, while preloading recurrence context early enough for later form wiring.
+
+### Consequences
+- Future recurrence-edit phases should extend `AppointmentFormProps` intentionally instead of bypassing the current form type with inline prop changes.
+- The edit page should preserve the explanatory warning state instead of turning terminal appointments into a generic 404.
+
+### Citations
+- [src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx](../src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx)
+
+### memory_meta
+- timestamp: 2026-06-01
+- author: GitHub Copilot
+
 ## Admin Shell with Server Guard and Client Sidebar — 2026-04-24
 
 ### Facts

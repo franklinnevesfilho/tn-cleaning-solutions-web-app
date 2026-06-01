@@ -55,6 +55,14 @@ type ParsedUpdateAppointmentInput = {
   employee_ids: string[]
 }
 
+type ParsedUpdateRecurrenceInput = {
+  edit_scope: 'occurrence' | 'series' | 'future'
+  recurrence_series_id: string | null
+  recurrence_frequency: RecurrenceFrequency | null
+  recurrence_end_date: string | null
+  recurrence_max_occurrences: number | null
+}
+
 type AppointmentStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
 
 function isValidDate(value: string) {
@@ -389,6 +397,66 @@ function parseUpdateAppointmentFormData(formData: FormData):
   }
 }
 
+function parseUpdateRecurrenceFormData(formData: FormData):
+  | { success: true; data: ParsedUpdateRecurrenceInput }
+  | { success: false; error: string; fieldErrors: AppointmentFieldErrors } {
+  const editScopeRaw = String(formData.get('edit_scope') ?? '').trim()
+  const recurrenceSeriesId = String(formData.get('recurrence_series_id') ?? '').trim()
+  const recurrenceFrequencyRaw = String(formData.get('recurrence_frequency') ?? '').trim()
+  const recurrenceEndDateRaw = String(formData.get('recurrence_end_date') ?? '').trim()
+  const recurrenceMaxOccurrencesRaw = String(formData.get('recurrence_max_occurrences') ?? '').trim()
+
+  const fieldErrors: AppointmentFieldErrors = {}
+
+  const editScope: ParsedUpdateRecurrenceInput['edit_scope'] =
+    editScopeRaw === 'series' || editScopeRaw === 'future' || editScopeRaw === 'occurrence'
+      ? editScopeRaw
+      : 'occurrence'
+
+  let recurrenceFrequency: RecurrenceFrequency | null = null
+  if (recurrenceFrequencyRaw) {
+    if (
+      recurrenceFrequencyRaw !== 'daily' &&
+      recurrenceFrequencyRaw !== 'weekly' &&
+      recurrenceFrequencyRaw !== 'biweekly' &&
+      recurrenceFrequencyRaw !== 'monthly'
+    ) {
+      fieldErrors.recurrence_frequency = 'Select a valid recurrence frequency.'
+    } else {
+      recurrenceFrequency = recurrenceFrequencyRaw
+    }
+  }
+
+  if (recurrenceEndDateRaw && !isValidDate(recurrenceEndDateRaw)) {
+    fieldErrors.recurrence_end_date = 'Enter a valid end date.'
+  }
+
+  const parsedMaxOccurrences = parsePositiveInt(recurrenceMaxOccurrencesRaw)
+  if (recurrenceMaxOccurrencesRaw && parsedMaxOccurrences === 'invalid') {
+    fieldErrors.recurrence_max_occurrences =
+      'Max occurrences must be a whole number greater than zero.'
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return {
+      success: false,
+      error: 'Please correct the highlighted fields.',
+      fieldErrors,
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      edit_scope: editScope,
+      recurrence_series_id: recurrenceSeriesId || null,
+      recurrence_frequency: recurrenceFrequency,
+      recurrence_end_date: recurrenceEndDateRaw || null,
+      recurrence_max_occurrences: parsedMaxOccurrences === 'invalid' ? null : parsedMaxOccurrences,
+    },
+  }
+}
+
 export async function createAppointment(formData: FormData): Promise<AppointmentActionResult>
 export async function createAppointment(
   _prevState: AppointmentActionResult,
@@ -570,58 +638,261 @@ export async function updateAppointment(
     return parsed
   }
 
+  const parsedRecurrence = parseUpdateRecurrenceFormData(formData)
+  if (!parsedRecurrence.success) {
+    return parsedRecurrence
+  }
+
   try {
     const adminClient = createAdminClient()
 
-    const { data: appointment, error: appointmentError } = await adminClient
+    const { data: existingAppointment, error: existingAppointmentError } = await adminClient
       .from('appointments')
-      .update({
-        job_id: parsed.data.job_id,
-        location_id: parsed.data.location_id,
-        scheduled_date: parsed.data.scheduled_date,
-        scheduled_start_time: parsed.data.scheduled_start_time,
-        scheduled_end_time: parsed.data.scheduled_end_time,
-        price_override_cents: parsed.data.price_override_cents,
-        notes: parsed.data.notes,
-        status: parsed.data.status,
-      })
+      .select('id, client_id, recurrence_series_id, status')
       .eq('id', id)
       .eq('is_archived', false)
-      .select('id')
       .maybeSingle()
 
-    if (appointmentError) {
-      return { success: false, error: appointmentError.message }
+    if (existingAppointmentError) {
+      return { success: false, error: existingAppointmentError.message }
     }
 
-    if (!appointment) {
+    if (!existingAppointment) {
       return { success: false, error: 'Appointment not found.' }
     }
 
-    const { error: deleteAssignmentsError } = await adminClient
-      .from('appointment_employees')
-      .delete()
-      .eq('appointment_id', id)
-
-    if (deleteAssignmentsError) {
-      return { success: false, error: deleteAssignmentsError.message }
+    if (existingAppointment.status === 'completed' || existingAppointment.status === 'cancelled') {
+      return {
+        success: false,
+        error: 'This appointment cannot be edited because it has already been completed or cancelled.',
+      }
     }
 
-    if (parsed.data.employee_ids.length > 0) {
-      const assignmentInserts: TablesInsert<'appointment_employees'>[] = parsed.data.employee_ids.map(
-        (employeeId) => ({
-          appointment_id: id,
-          employee_id: employeeId,
-          admin_notes: '',
+    if (parsedRecurrence.data.edit_scope === 'series' || parsedRecurrence.data.edit_scope === 'future') {
+      if (!parsedRecurrence.data.recurrence_series_id) {
+        return { success: false, error: 'Recurrence series is required for this edit scope.' }
+      }
+
+      if (!parsedRecurrence.data.recurrence_frequency) {
+        return {
+          success: false,
+          error: 'Please correct the highlighted fields.',
+          fieldErrors: {
+            recurrence_frequency: 'Select a recurrence frequency.',
+          },
+        }
+      }
+
+      const recurrenceSeriesId = parsedRecurrence.data.recurrence_series_id
+
+      if (!existingAppointment.recurrence_series_id || existingAppointment.recurrence_series_id !== recurrenceSeriesId) {
+        return { success: false, error: 'Recurrence series not found.' }
+      }
+
+      const { data: recurrenceSeries, error: recurrenceSeriesError } = await adminClient
+        .from('recurrence_series')
+        .select('id')
+        .eq('id', recurrenceSeriesId)
+        .eq('is_archived', false)
+        .maybeSingle()
+
+      if (recurrenceSeriesError) {
+        return { success: false, error: recurrenceSeriesError.message }
+      }
+
+      if (!recurrenceSeries) {
+        return { success: false, error: 'Recurrence series not found.' }
+      }
+    }
+
+    if (parsedRecurrence.data.edit_scope === 'series') {
+      const recurrenceSeriesId = parsedRecurrence.data.recurrence_series_id
+      if (!recurrenceSeriesId) {
+        return { success: false, error: 'Recurrence series is required for this edit scope.' }
+      }
+
+      const { error: recurrenceUpdateError } = await adminClient
+        .from('recurrence_series')
+        .update({
+          frequency: parsedRecurrence.data.recurrence_frequency,
+          end_date: parsedRecurrence.data.recurrence_end_date,
+          max_occurrences: parsedRecurrence.data.recurrence_max_occurrences,
         })
-      )
+        .eq('id', recurrenceSeriesId)
+        .eq('is_archived', false)
 
-      const { error: assignmentInsertError } = await adminClient
+      if (recurrenceUpdateError) {
+        return { success: false, error: recurrenceUpdateError.message }
+      }
+    } else {
+      const { data: appointment, error: appointmentError } = await adminClient
+        .from('appointments')
+        .update({
+          job_id: parsed.data.job_id,
+          location_id: parsed.data.location_id,
+          scheduled_date: parsed.data.scheduled_date,
+          scheduled_start_time: parsed.data.scheduled_start_time,
+          scheduled_end_time: parsed.data.scheduled_end_time,
+          price_override_cents: parsed.data.price_override_cents,
+          notes: parsed.data.notes,
+          status: parsed.data.status,
+        })
+        .eq('id', id)
+        .eq('is_archived', false)
+        .select(
+          'id, client_id, job_id, recurrence_series_id, location_id, scheduled_date, scheduled_start_time, scheduled_end_time, price_override_cents, notes'
+        )
+        .maybeSingle()
+
+      if (appointmentError) {
+        return { success: false, error: appointmentError.message }
+      }
+
+      if (!appointment) {
+        return { success: false, error: 'Appointment not found.' }
+      }
+
+      const { error: deleteAssignmentsError } = await adminClient
         .from('appointment_employees')
-        .insert(assignmentInserts)
+        .delete()
+        .eq('appointment_id', id)
 
-      if (assignmentInsertError) {
-        return { success: false, error: assignmentInsertError.message }
+      if (deleteAssignmentsError) {
+        return { success: false, error: deleteAssignmentsError.message }
+      }
+
+      if (parsed.data.employee_ids.length > 0) {
+        const assignmentInserts: TablesInsert<'appointment_employees'>[] = parsed.data.employee_ids.map(
+          (employeeId) => ({
+            appointment_id: id,
+            employee_id: employeeId,
+            admin_notes: '',
+          })
+        )
+
+        const { error: assignmentInsertError } = await adminClient
+          .from('appointment_employees')
+          .insert(assignmentInserts)
+
+        if (assignmentInsertError) {
+          return { success: false, error: assignmentInsertError.message }
+        }
+      }
+
+      if (parsedRecurrence.data.edit_scope === 'future') {
+        const recurrenceSeriesId = parsedRecurrence.data.recurrence_series_id
+        if (!recurrenceSeriesId) {
+          return { success: false, error: 'Recurrence series is required for this edit scope.' }
+        }
+
+        const { error: recurrenceUpdateError } = await adminClient
+          .from('recurrence_series')
+          .update({
+            frequency: parsedRecurrence.data.recurrence_frequency,
+            end_date: parsedRecurrence.data.recurrence_end_date,
+            max_occurrences: parsedRecurrence.data.recurrence_max_occurrences,
+          })
+          .eq('id', recurrenceSeriesId)
+          .eq('is_archived', false)
+
+        if (recurrenceUpdateError) {
+          return { success: false, error: recurrenceUpdateError.message }
+        }
+
+        const { data: preservedAppointments, error: preservedAppointmentsError } = await adminClient
+          .from('appointments')
+          .select('scheduled_date')
+          .eq('recurrence_series_id', recurrenceSeriesId)
+          .gt('scheduled_date', appointment.scheduled_date)
+          .in('status', ['completed', 'cancelled'])
+          .eq('is_archived', false)
+
+        if (preservedAppointmentsError) {
+          return { success: false, error: preservedAppointmentsError.message }
+        }
+
+        const preservedDates = new Set((preservedAppointments ?? []).map((row) => row.scheduled_date))
+
+        const { data: futurePendingAppointments, error: futurePendingAppointmentsError } = await adminClient
+          .from('appointments')
+          .select('id')
+          .eq('recurrence_series_id', recurrenceSeriesId)
+          .gt('scheduled_date', appointment.scheduled_date)
+          .eq('status', 'scheduled')
+          .eq('is_archived', false)
+
+        if (futurePendingAppointmentsError) {
+          return { success: false, error: futurePendingAppointmentsError.message }
+        }
+
+        const futurePendingAppointmentIds = (futurePendingAppointments ?? []).map((row) => row.id)
+
+        const nextDate = formatDate(addDays(parseDate(appointment.scheduled_date), 1))
+        const recurrenceDates = generateRecurrenceDates(
+          nextDate,
+          parsedRecurrence.data.recurrence_frequency as RecurrenceFrequency,
+          parsedRecurrence.data.recurrence_end_date,
+          parsedRecurrence.data.recurrence_max_occurrences
+        ).filter((scheduledDate) => !preservedDates.has(scheduledDate))
+
+        if (recurrenceDates.length > 0) {
+          const appointmentInserts: TablesInsert<'appointments'>[] = recurrenceDates.map((scheduledDate) => ({
+            client_id: appointment.client_id,
+            job_id: appointment.job_id,
+            recurrence_series_id: appointment.recurrence_series_id,
+            location_id: appointment.location_id,
+            scheduled_date: scheduledDate,
+            scheduled_start_time: appointment.scheduled_start_time,
+            scheduled_end_time: appointment.scheduled_end_time,
+            price_override_cents: appointment.price_override_cents,
+            notes: appointment.notes,
+            status: 'scheduled',
+          }))
+
+          const { data: regeneratedAppointments, error: regeneratedAppointmentsError } = await adminClient
+            .from('appointments')
+            .insert(appointmentInserts)
+            .select('id')
+
+          if (regeneratedAppointmentsError) {
+            return { success: false, error: regeneratedAppointmentsError.message }
+          }
+
+          const regeneratedAppointmentIds = (regeneratedAppointments ?? []).map((row) => row.id)
+
+          if (parsed.data.employee_ids.length > 0 && regeneratedAppointmentIds.length > 0) {
+            const regeneratedAssignmentInserts: TablesInsert<'appointment_employees'>[] = []
+
+            for (const appointmentId of regeneratedAppointmentIds) {
+              for (const employeeId of parsed.data.employee_ids) {
+                regeneratedAssignmentInserts.push({
+                  appointment_id: appointmentId,
+                  employee_id: employeeId,
+                  admin_notes: '',
+                })
+              }
+            }
+
+            const { error: regeneratedAssignmentsError } = await adminClient
+              .from('appointment_employees')
+              .insert(regeneratedAssignmentInserts)
+
+            if (regeneratedAssignmentsError) {
+              return { success: false, error: regeneratedAssignmentsError.message }
+            }
+          }
+        }
+
+        if (futurePendingAppointmentIds.length > 0) {
+          const { error: deleteFuturePendingError } = await adminClient
+            .from('appointments')
+            .delete()
+            .in('id', futurePendingAppointmentIds)
+
+          if (deleteFuturePendingError) {
+            return { success: false, error: deleteFuturePendingError.message }
+          }
+        }
       }
     }
   } catch {
