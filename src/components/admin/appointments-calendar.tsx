@@ -130,7 +130,6 @@ export function AppointmentsCalendar({ appointments, month, year }: Appointments
           const dayAppointments = appointmentsByDay.get(dayKey) ?? []
           const inCurrentMonth = isSameMonth(day, monthDate)
           const isToday = isSameDay(day, today)
-          const hiddenCount = Math.max(dayAppointments.length - 3, 0)
 
           return (
             <div
@@ -154,7 +153,7 @@ export function AppointmentsCalendar({ appointments, month, year }: Appointments
               </Link>
 
               <div className="space-y-1.5">
-                {dayAppointments.slice(0, 3).map((appointment) => (
+                {dayAppointments.map((appointment) => (
                   <Link
                     key={appointment.id}
                     href={`/solutions/appointments/${appointment.id}`}
@@ -170,15 +169,6 @@ export function AppointmentsCalendar({ appointments, month, year }: Appointments
                     <p className="truncate text-[10px] opacity-90">{appointment.client.name}</p>
                   </Link>
                 ))}
-
-                {hiddenCount > 0 ? (
-                  <Link
-                    href={`/solutions/appointments/new?date=${dayKey}`}
-                    className="inline-block text-[11px] font-medium text-emerald-700 hover:text-emerald-800"
-                  >
-                    +{hiddenCount} more
-                  </Link>
-                ) : null}
               </div>
             </div>
           )

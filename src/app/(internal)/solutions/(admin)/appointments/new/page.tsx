@@ -2,23 +2,45 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 import { AppointmentForm } from '@/components/admin/appointment-form'
+import { NewAppointmentScheduleContext } from '@/components/admin/new-appointment-schedule-context'
 import { createClient } from '@/lib/supabase/server'
 
 type NewAppointmentPageProps = {
-  searchParams: Promise<{ date?: string | string[] }>
+  searchParams: Promise<{ date?: string | string[]; month?: string | string[]; year?: string | string[] }>
 }
 
 function normalizeParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function isDateValue(value: string | undefined) {
+function isDateValue(value: string | undefined): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))
+}
+
+function parseMonth(value: string | undefined, fallback: number) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 12) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function parseYear(value: string | undefined, fallback: number) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 2100) {
+    return fallback
+  }
+
+  return parsed
 }
 
 export default async function NewAppointmentPage({ searchParams }: NewAppointmentPageProps) {
   const params = await searchParams
   const defaultDate = normalizeParam(params.date)
+  const fallbackDate = isDateValue(defaultDate) ? new Date(`${defaultDate}T00:00:00`) : new Date()
+  const selectedMonth = parseMonth(normalizeParam(params.month), fallbackDate.getMonth() + 1)
+  const selectedYear = parseYear(normalizeParam(params.year), fallbackDate.getFullYear())
 
   const supabase = await createClient()
 
@@ -46,7 +68,7 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
   const loadError = clientsError ?? jobsError ?? employeesError
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <section className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm shadow-emerald-950/5">
         <div className="space-y-3">
           <Link
@@ -63,28 +85,34 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
         </div>
       </section>
 
-      {loadError ? (
-        <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {loadError.message}
-        </section>
-      ) : (
-        <AppointmentForm
-          clients={(clients ?? []).map((client) => ({
-            id: client.id,
-            name: client.name,
-            client_locations: (client.client_locations ?? [])
-              .filter((location) => !location.is_archived)
-              .map((location) => ({
-                id: location.id,
-                label: location.label,
-                address: location.address,
-              })),
-          }))}
-          jobs={jobs ?? []}
-          employees={employees ?? []}
-          defaultDate={isDateValue(defaultDate) ? defaultDate : undefined}
-        />
-      )}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-stretch">
+        <div className="lg:[&>section]:h-full">
+          {loadError ? (
+            <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {loadError.message}
+            </section>
+          ) : (
+            <AppointmentForm
+              clients={(clients ?? []).map((client) => ({
+                id: client.id,
+                name: client.name,
+                client_locations: (client.client_locations ?? [])
+                  .filter((location) => !location.is_archived)
+                  .map((location) => ({
+                    id: location.id,
+                    label: location.label,
+                    address: location.address,
+                  })),
+              }))}
+              jobs={jobs ?? []}
+              employees={employees ?? []}
+              defaultDate={isDateValue(defaultDate) ? defaultDate : undefined}
+            />
+          )}
+        </div>
+
+        <NewAppointmentScheduleContext initialMonth={selectedMonth} initialYear={selectedYear} />
+      </div>
     </div>
   )
 }
