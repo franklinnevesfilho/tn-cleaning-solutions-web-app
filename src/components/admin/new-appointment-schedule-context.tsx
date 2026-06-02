@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { endOfMonth, format, startOfMonth } from 'date-fns'
 
@@ -36,9 +37,11 @@ type ContextAppointmentQueryRow = Omit<ContextAppointmentRow, 'clients' | 'jobs'
     | null
 }
 
-type NewAppointmentScheduleContextProps = {
+type AppointmentScheduleContextProps = {
   initialMonth: number
   initialYear: number
+  currentAppointmentId?: string
+  showNewAppointmentLink?: boolean
 }
 
 function statusClasses(status: ContextAppointmentRow['status']) {
@@ -65,10 +68,12 @@ function pickSingle<T>(value: T[] | T | null): T | null {
   return value
 }
 
-export function NewAppointmentScheduleContext({
+export function AppointmentScheduleContext({
   initialMonth,
   initialYear,
-}: NewAppointmentScheduleContextProps) {
+  currentAppointmentId,
+  showNewAppointmentLink,
+}: AppointmentScheduleContextProps) {
   const [selectedMonth, setSelectedMonth] = useState(initialMonth)
   const [selectedYear, setSelectedYear] = useState(initialYear)
   const [appointments, setAppointments] = useState<ContextAppointmentRow[]>([])
@@ -159,43 +164,52 @@ export function NewAppointmentScheduleContext({
           <p className="text-xs text-neutral-500">Showing appointments for {contextMonthLabel}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
 
-          <select
-            name="month"
-            value={String(selectedMonth)}
-            onChange={(event) => updateMonth(Number(event.target.value))}
-            className="h-8 rounded-md border border-neutral-200 bg-white px-2 text-xs text-neutral-700"
-          >
-            {Array.from({ length: 12 }, (_, index) => {
-              const monthValue = index + 1
+            <select
+              name="month"
+              value={String(selectedMonth)}
+              onChange={(event) => updateMonth(Number(event.target.value))}
+              className="h-8 rounded-md border border-neutral-200 bg-white px-2 text-xs text-neutral-700"
+            >
+              {Array.from({ length: 12 }, (_, index) => {
+                const monthValue = index + 1
 
-              return (
-                <option key={monthValue} value={monthValue}>
-                  {format(new Date(2024, index, 1), 'MMM')}
-                </option>
-              )
-            })}
-          </select>
+                return (
+                  <option key={monthValue} value={monthValue}>
+                    {format(new Date(2024, index, 1), 'MMM')}
+                  </option>
+                )
+              })}
+            </select>
 
-          <select
-            name="year"
-            value={String(selectedYear)}
-            onChange={(event) => updateYear(Number(event.target.value))}
-            className="h-8 rounded-md border border-neutral-200 bg-white px-2 text-xs text-neutral-700"
-          >
-            {Array.from({ length: 101 }, (_, index) => {
-              const yearValue = 2000 + index
+            <select
+              name="year"
+              value={String(selectedYear)}
+              onChange={(event) => updateYear(Number(event.target.value))}
+              className="h-8 rounded-md border border-neutral-200 bg-white px-2 text-xs text-neutral-700"
+            >
+              {Array.from({ length: 101 }, (_, index) => {
+                const yearValue = 2000 + index
 
-              return (
-                <option key={yearValue} value={yearValue}>
-                  {yearValue}
-                </option>
-              )
-            })}
-          </select>
+                return (
+                  <option key={yearValue} value={yearValue}>
+                    {yearValue}
+                  </option>
+                )
+              })}
+            </select>
 
-          {isLoading ? <span className="text-xs text-neutral-500">Loading...</span> : null}
+            {showNewAppointmentLink ? (
+              <Link
+                href="/solutions/appointments/new"
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700"
+              >
+                New Appointment
+              </Link>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -206,7 +220,7 @@ export function NewAppointmentScheduleContext({
       ) : null}
 
       {appointments.length > 0 ? (
-        <div className="mt-3 space-y-2 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
+        <div className="mt-3 flex flex-col gap-3 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
           {appointments.map((appointment) => {
             const locationLabel = appointment.client_locations?.label?.trim()
             const locationAddress = appointment.client_locations?.address?.trim()
@@ -214,8 +228,15 @@ export function NewAppointmentScheduleContext({
               locationLabel || locationAddress ? [locationLabel, locationAddress].filter(Boolean).join(' - ') : null
             const scheduledDateLabel = format(new Date(`${appointment.scheduled_date}T00:00:00`), 'EEE, MMM d')
 
+            const isCurrentAppointment = currentAppointmentId === appointment.id
+
             return (
-              <article key={appointment.id} className="rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-xs">
+              <Link className="block" href={`/solutions/appointments/${appointment.id}/edit`} key={appointment.id}>
+                <article
+                  className={`cursor-pointer rounded-xl border px-3 py-2.5 text-xs transition-colors hover:border-emerald-300 hover:bg-emerald-50/30 ${
+                    isCurrentAppointment ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-200 bg-white'
+                  }`}
+                >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1 text-neutral-700">
                     <p className="font-medium text-neutral-900">
@@ -244,7 +265,8 @@ export function NewAppointmentScheduleContext({
                     {appointment.status.replace('_', ' ')}
                   </span>
                 </div>
-              </article>
+                </article>
+              </Link>
             )
           })}
         </div>
