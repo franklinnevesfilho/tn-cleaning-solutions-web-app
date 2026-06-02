@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import type { PostgrestError } from '@supabase/supabase-js'
 
 import { AppointmentForm } from '@/components/admin/appointment-form'
+import { AppointmentScheduleContext } from '@/components/admin/new-appointment-schedule-context'
 import { createClient } from '@/lib/supabase/server'
 
 type EditAppointmentPageProps = {
@@ -109,9 +110,12 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
     status: typedAppointment.status,
     assignedEmployeeIds: (typedAppointment.appointment_employees ?? []).map((row) => row.employee_id),
   }
+  const [scheduledYearValue, scheduledMonthValue] = typedAppointment.scheduled_date.split('-', 3)
+  const scheduledMonth = Number(scheduledMonthValue)
+  const scheduledYear = Number(scheduledYearValue)
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <section className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm shadow-emerald-950/5">
         <div className="space-y-3">
           <Link
@@ -128,33 +132,42 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
         </div>
       </section>
 
-      {loadError ? (
-        <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {loadError.message}
-        </section>
-      ) : typedAppointment.status === 'completed' || typedAppointment.status === 'cancelled' ? (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          This appointment cannot be edited because it has already been {typedAppointment.status}.
-        </section>
-      ) : (
-        <AppointmentForm
-          clients={(clients ?? []).map((client) => ({
-            id: client.id,
-            name: client.name,
-            client_locations: (client.client_locations ?? [])
-              .filter((location) => !location.is_archived)
-              .map((location) => ({
-                id: location.id,
-                label: location.label,
-                address: location.address,
-              })),
-          }))}
-          jobs={jobs ?? []}
-          employees={employees ?? []}
-          appointment={appointmentFormAppointment}
-          recurrenceSeries={recurrenceSeries ?? null}
+      <div className="grid gap-6 lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)] lg:items-start">
+        <AppointmentScheduleContext
+          initialMonth={scheduledMonth}
+          initialYear={scheduledYear}
+          currentAppointmentId={id}
+          showNewAppointmentLink
         />
-      )}
+
+        {loadError ? (
+          <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadError.message}
+          </section>
+        ) : typedAppointment.status === 'completed' || typedAppointment.status === 'cancelled' ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            This appointment cannot be edited because it has already been {typedAppointment.status}.
+          </section>
+        ) : (
+          <AppointmentForm
+            clients={(clients ?? []).map((client) => ({
+              id: client.id,
+              name: client.name,
+              client_locations: (client.client_locations ?? [])
+                .filter((location) => !location.is_archived)
+                .map((location) => ({
+                  id: location.id,
+                  label: location.label,
+                  address: location.address,
+                })),
+            }))}
+            jobs={jobs ?? []}
+            employees={employees ?? []}
+            appointment={appointmentFormAppointment}
+            recurrenceSeries={recurrenceSeries ?? null}
+          />
+        )}
+      </div>
     </div>
   )
 }

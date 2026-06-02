@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 import { AppointmentForm } from '@/components/admin/appointment-form'
-import { NewAppointmentScheduleContext } from '@/components/admin/new-appointment-schedule-context'
+import { AppointmentScheduleContext } from '@/components/admin/new-appointment-schedule-context'
 import { createClient } from '@/lib/supabase/server'
 
 type NewAppointmentPageProps = {
@@ -85,7 +85,9 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-stretch">
+      <div className="grid gap-6 lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)] lg:items-stretch">
+        <AppointmentScheduleContext initialMonth={selectedMonth} initialYear={selectedYear} />
+
         <div className="lg:[&>section]:h-full">
           {loadError ? (
             <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -110,8 +112,6 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
             />
           )}
         </div>
-
-        <NewAppointmentScheduleContext initialMonth={selectedMonth} initialYear={selectedYear} />
       </div>
     </div>
   )
