@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import {
   BriefcaseBusiness,
   CalendarDays,
+  Clock,
   FileText,
   LayoutDashboard,
   LogOut,
@@ -23,6 +24,7 @@ const navItems = [
   { label: 'Clients', href: '/solutions/clients', icon: Users },
   { label: 'Jobs', href: '/solutions/jobs', icon: BriefcaseBusiness },
   { label: 'Employees', href: '/solutions/employees', icon: UserRound },
+  { label: 'Time Sheets', href: '/solutions/time-tracking', icon: Clock },
   { label: 'Invoices', href: '/solutions/invoices', icon: FileText },
   { label: 'Profile', href: '/solutions/profile', icon: UserRound },
 ] as const
