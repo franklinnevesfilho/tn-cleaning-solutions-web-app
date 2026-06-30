@@ -1,13 +1,4 @@
-import { redirect } from 'next/navigation'
-
-type Props = {
-	params: Promise<{ id: string }>
-}
-
-export default async function AdminEmployeeTimeSheetsPage({ params }: Props) {
-	const { id } = await params
-	redirect(`/solutions/time-sheets?employee=${id}`)
-}import { endOfMonth, format, startOfMonth } from 'date-fns'
+import { endOfMonth, format, startOfMonth } from 'date-fns'
 import { Briefcase, CheckCircle, Clock } from 'lucide-react'
 import { notFound } from 'next/navigation'
 
