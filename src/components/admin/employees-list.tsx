@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Search, UserRound } from 'lucide-react'
+import { Search, UserRound, ChevronRight, Eye } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,6 +17,12 @@ type EmployeeRow = {
 	is_archived: boolean
 }
 
+function getInitials(name: string) {
+	const parts = name.trim().split(/\s+/)
+	if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
+	return `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase()
+}
+
 function EmployeeCard({ employee, isCurrentUser }: { employee: EmployeeRow; isCurrentUser: boolean }) {
 	const action = async (_formData: FormData) => {
 		await (employee.is_active ? deactivateEmployee(employee.id) : activateEmployee(employee.id))
@@ -27,49 +33,50 @@ function EmployeeCard({ employee, isCurrentUser }: { employee: EmployeeRow; isCu
 			<CardHeader className="gap-2 border-b border-neutral-100 px-5 py-4">
 				<Link
 					href={`/solutions/employees/${employee.id}`}
-					className="block -mx-5 -mt-4 rounded-t-lg px-5 pb-4 pt-4 transition-colors hover:bg-neutral-50"
+					className="flex items-center justify-between -mx-5 -mt-4 rounded-t-lg px-5 pb-4 pt-4 transition-colors hover:bg-neutral-50"
 				>
-					<div className="flex flex-col gap-1">
-					<div className="flex flex-wrap items-center gap-2">
-						<CardTitle className="truncate text-base font-semibold text-neutral-950">
-							{employee.full_name}
-						</CardTitle>
-						{isCurrentUser ? (
-							<span
-								className={`
-									shrink-0 
-									rounded-full 
-									bg-emerald-50 
-									px-2 py-0.5 
-									text-[0.68rem] 
-									font-semibold 
-									justify-center
-									items-center
-									flex
-									uppercase 
-									tracking-[0.18em] 
-									text-emerald-700
-									border border-emerald-200
-								`}
-							>
-								You
-							</span>
-						) : null}
-						<span
-							className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-								employee.is_active
-									? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
-									: 'border border-neutral-200 bg-neutral-100 text-neutral-600'
+					<div className="flex items-center gap-3">
+						<div
+							className={`flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${
+								employee.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-neutral-100 text-neutral-500'
 							}`}
 						>
-							{employee.is_active ? 'Active' : 'Inactive'}
-						</span>
+							{getInitials(employee.full_name)}
+						</div>
+						<div className="flex flex-col gap-1">
+							<div className="flex flex-wrap items-center gap-2">
+								<CardTitle className="truncate text-base font-semibold text-neutral-950">
+									{employee.full_name}
+								</CardTitle>
+								{isCurrentUser ? (
+									<span className="flex shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+										You
+									</span>
+								) : null}
+								<span
+									className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+										employee.is_active
+											? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+											: 'border border-neutral-200 bg-neutral-100 text-neutral-600'
+									}`}
+								>
+									{employee.is_active ? 'Active' : 'Inactive'}
+								</span>
+							</div>
+							<p className="mt-1 text-sm text-neutral-600">{employee.phone || 'No phone'}</p>
+						</div>
 					</div>
-					<p className="mt-1 text-sm text-neutral-600">{employee.phone || 'No phone'}</p>
-					</div>
+					<ChevronRight className="size-4 shrink-0 text-neutral-400" aria-hidden="true" />
 				</Link>
 			</CardHeader>
-			<CardFooter className="flex items-center px-5 py-3 border-neutral-100">
+			<CardFooter className="flex items-center justify-between px-5 py-3 border-neutral-100">
+				<Link
+					href={`/solutions/employees/${employee.id}`}
+					className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-600 hover:text-emerald-700 transition-colors"
+				>
+					<Eye className="size-3.5" aria-hidden="true" />
+					View profile
+				</Link>
 				<form action={action}>
 					<Button
 						type="submit"
