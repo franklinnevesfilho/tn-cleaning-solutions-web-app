@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Clock, Search, UserRound } from 'lucide-react'
+import { Search, UserRound } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -25,52 +25,58 @@ function EmployeeCard({ employee, isCurrentUser }: { employee: EmployeeRow; isCu
 	return (
 		<Card className="rounded-2xl border border-neutral-200 bg-white py-0 shadow-sm shadow-emerald-950/5">
 			<CardHeader className="gap-2 border-b border-neutral-100 px-5 py-4">
-				<div className="flex items-start justify-between gap-3">
-					<div className="min-w-0">
-						<div className="flex items-center gap-2">
-							<CardTitle className="truncate text-base font-semibold text-neutral-950">
-								{employee.full_name}
-							</CardTitle>
-							{isCurrentUser ? (
-								<span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-									You
-								</span>
-							) : null}
-						</div>
-						<p className="mt-1 text-sm text-neutral-600">{employee.phone || 'No phone'}</p>
-					</div>
-					<span
-						className={`rounded-full px-2 py-1 text-xs font-medium ${
-							employee.is_active
-								? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
-								: 'border border-neutral-200 bg-neutral-100 text-neutral-600'
-						}`}
-					>
-						{employee.is_active ? 'Active' : 'Inactive'}
-					</span>
-				</div>
-			</CardHeader>
-			<CardFooter className="justify-between border-neutral-100 px-5 py-3">
 				<Link
 					href={`/solutions/employees/${employee.id}`}
-					className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
+					className="block -mx-5 -mt-4 rounded-t-lg px-5 pb-4 pt-4 transition-colors hover:bg-neutral-50"
 				>
-					View
+					<div className="flex flex-col gap-1">
+					<div className="flex flex-wrap items-center gap-2">
+						<CardTitle className="truncate text-base font-semibold text-neutral-950">
+							{employee.full_name}
+						</CardTitle>
+						{isCurrentUser ? (
+							<span
+								className={`
+									shrink-0 
+									rounded-full 
+									bg-emerald-50 
+									px-2 py-0.5 
+									text-[0.68rem] 
+									font-semibold 
+									justify-center
+									items-center
+									flex
+									uppercase 
+									tracking-[0.18em] 
+									text-emerald-700
+									border border-emerald-200
+								`}
+							>
+								You
+							</span>
+						) : null}
+						<span
+							className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+								employee.is_active
+									? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+									: 'border border-neutral-200 bg-neutral-100 text-neutral-600'
+							}`}
+						>
+							{employee.is_active ? 'Active' : 'Inactive'}
+						</span>
+					</div>
+					<p className="mt-1 text-sm text-neutral-600">{employee.phone || 'No phone'}</p>
+					</div>
 				</Link>
-				<Link
-					href={`/solutions/employees/${employee.id}/time-sheets`}
-					className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
-				>
-					Time Sheets
-					<Clock className="size-3.5 text-emerald-600" aria-hidden="true" />
-				</Link>
+			</CardHeader>
+			<CardFooter className="flex items-center px-5 py-3 border-neutral-100">
 				<form action={action}>
 					<Button
 						type="submit"
 						variant="outline"
 						className={`h-8 cursor-pointer rounded-full px-3 text-xs font-medium ${
 							employee.is_active
-								? 'border-neutral-200 bg-white text-neutral-700 hover:bg-red-500/80'
+								? 'border-neutral-200 bg-white text-neutral-700 hover:border-red-200 hover:bg-red-50 hover:text-red-700'
 								: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
 						}`}
 					>
