@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation'
 
 import { AdminClockOverride } from '@/components/admin/admin-clock-override'
 import { Button } from '@/components/ui/button'
-import { cancelAppointment } from '@/lib/actions/appointments'
+import { cancelAppointment, uncancelAppointment } from '@/lib/actions/appointments'
 import { createClient } from '@/lib/supabase/server'
 
 type AppointmentDetailPageProps = {
@@ -130,6 +130,12 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
     await cancelAppointment(id)
   }
 
+  async function handleUncancelAppointment() {
+    'use server'
+
+    await uncancelAppointment(id)
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm shadow-emerald-950/5">
@@ -168,7 +174,17 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
               </Button>
             </Link>
 
-            {appointment.status !== 'cancelled' ? (
+            {appointment.status === 'cancelled' ? (
+              <form action={handleUncancelAppointment}>
+                <Button
+                  type="submit"
+                  variant="outline"
+                  className="h-10 rounded-full border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                >
+                  Reopen
+                </Button>
+              </form>
+            ) : (
               <form action={handleCancelAppointment}>
                 <Button
                   type="submit"
@@ -178,7 +194,7 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
                   Cancel
                 </Button>
               </form>
-            ) : null}
+            )}
           </div>
         </div>
       </section>

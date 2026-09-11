@@ -661,10 +661,10 @@ export async function updateAppointment(
       return { success: false, error: 'Appointment not found.' }
     }
 
-    if (existingAppointment.status === 'completed' || existingAppointment.status === 'cancelled') {
+    if (existingAppointment.status === 'completed') {
       return {
         success: false,
-        error: 'This appointment cannot be edited because it has already been completed or cancelled.',
+        error: 'This appointment cannot be edited because it has already been completed.',
       }
     }
 
@@ -922,6 +922,34 @@ export async function cancelAppointment(id: string): Promise<AppointmentActionRe
     .update({ status: 'cancelled' })
     .eq('id', id)
     .eq('is_archived', false)
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath('/solutions/appointments')
+  revalidatePath(`/solutions/appointments/${id}`)
+
+  return { success: true, data: { id } }
+}
+
+export async function uncancelAppointment(id: string): Promise<AppointmentActionResult> {
+  if (!id) {
+    return { success: false, error: 'Appointment id is required.' }
+  }
+
+  const authResult = await requireAdminRole()
+  if (!authResult.success) {
+    return { success: false, error: authResult.error }
+  }
+
+  const adminClient = createAdminClient()
+  const { error } = await adminClient
+    .from('appointments')
+    .update({ status: 'scheduled' })
+    .eq('id', id)
+    .eq('is_archived', false)
+    .eq('status', 'cancelled')
 
   if (error) {
     return { success: false, error: error.message }

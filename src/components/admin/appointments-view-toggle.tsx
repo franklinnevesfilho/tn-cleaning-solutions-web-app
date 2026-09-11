@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Calendar, List } from 'lucide-react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
 import { AppointmentsCalendar } from '@/components/admin/appointments-calendar'
@@ -17,12 +18,38 @@ type AppointmentsViewToggleProps = {
 
 export function AppointmentsViewToggle({ appointments, month, year }: AppointmentsViewToggleProps) {
   const [view, setView] = useState<'calendar' | 'list'>('calendar')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const showCancelled = searchParams.get('showCancelled') === 'true'
+
+  const visibleAppointments = useMemo(() => {
+    if (showCancelled) {
+      return appointments
+    }
+
+    return appointments.filter((appointment) => appointment.status !== 'cancelled')
+  }, [appointments, showCancelled])
+
+  const toggleShowCancelled = () => {
+    const params = new URLSearchParams(searchParams.toString())
+
+    if (showCancelled) {
+      params.delete('showCancelled')
+    } else {
+      params.set('showCancelled', 'true')
+    }
+
+    router.push(`${pathname}?${params.toString()}`)
+  }
 
   return (
     <>
-      {/* Desktop view with toggle */}
       <div className="hidden md:block">
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+          <ShowCancelledToggle showCancelled={showCancelled} onToggle={toggleShowCancelled} />
+
           <div className="inline-flex rounded-xl border border-neutral-200 bg-white p-1 shadow-sm">
             <Button
               variant="ghost"
@@ -56,16 +83,39 @@ export function AppointmentsViewToggle({ appointments, month, year }: Appointmen
         </div>
 
         {view === 'calendar' ? (
-          <AppointmentsCalendar appointments={appointments} month={month} year={year} />
+          <AppointmentsCalendar appointments={visibleAppointments} month={month} year={year} />
         ) : (
-          <AppointmentsList appointments={appointments} month={month} year={year} />
+          <AppointmentsList appointments={visibleAppointments} month={month} year={year} />
         )}
       </div>
 
-      {/* Mobile view - always list */}
       <div className="md:hidden">
-        <AppointmentsList appointments={appointments} month={month} year={year} />
+        <div className="mb-3 flex justify-end">
+          <ShowCancelledToggle showCancelled={showCancelled} onToggle={toggleShowCancelled} />
+        </div>
+
+        <AppointmentsList appointments={visibleAppointments} month={month} year={year} />
       </div>
     </>
   )
 }
+
+type ShowCancelledToggleProps = {
+  showCancelled: boolean
+  onToggle: () => void
+}
+
+const ShowCancelledToggle = ({ showCancelled, onToggle }: ShowCancelledToggleProps) => (
+  <Button
+    type="button"
+    variant="outline"
+    aria-pressed={showCancelled}
+    className={cn(
+      'h-9 rounded-full',
+      showCancelled && 'border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+    )}
+    onClick={onToggle}
+  >
+    {showCancelled ? 'Hide cancelled' : 'Show cancelled'}
+  </Button>
+)
