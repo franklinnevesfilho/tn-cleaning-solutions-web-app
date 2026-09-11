@@ -15,7 +15,7 @@ export default async function EditEmployeePage({ params }: EditEmployeePageProps
 
   const { data: employee, error } = await supabase
     .from('employees')
-    .select('id, full_name, phone, is_active, is_archived')
+    .select('id, full_name, phone, started_at, address, e_transfer_email, is_active, is_archived')
     .eq('id', id)
     .maybeSingle()
 
@@ -46,6 +46,9 @@ export default async function EditEmployeePage({ params }: EditEmployeePageProps
           id: employee.id,
           full_name: employee.full_name,
           phone: employee.phone,
+          started_at: employee.started_at,
+          address: employee.address,
+          e_transfer_email: employee.e_transfer_email,
           is_active: employee.is_active,
         }}
       />

@@ -7,6 +7,9 @@ export type Database = {
           user_id: string
           full_name: string
           phone: string
+          started_at: string | null
+          address: string | null
+          e_transfer_email: string | null
           is_active: boolean
           created_at: string
           updated_at: string
@@ -17,6 +20,9 @@ export type Database = {
           user_id: string
           full_name: string
           phone: string
+          started_at?: string | null
+          address?: string | null
+          e_transfer_email?: string | null
           is_active: boolean
           created_at?: string
           updated_at?: string
@@ -27,6 +33,9 @@ export type Database = {
           user_id?: string
           full_name?: string
           phone?: string
+          started_at?: string | null
+          address?: string | null
+          e_transfer_email?: string | null
           is_active?: boolean
           created_at?: string
           updated_at?: string
@@ -329,9 +338,25 @@ export type Database = {
         }
       }
     }
+    Views: {
+      employees_employee_view: {
+        Row: {
+          id: string
+          user_id: string
+          full_name: string
+          phone: string | null
+          started_at: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+          is_archived: boolean
+        }
+      }
+    }
   }
 }
 
 export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
 export type TablesInsert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert']
 export type TablesUpdate<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update']
+export type Views<T extends keyof Database['public']['Views']> = Database['public']['Views'][T]['Row']
