@@ -1,0 +1,23 @@
+# Constitution — hourly pricing milestone
+
+1. Money is integer cents, always. No floats, no `numeric`, no decimal strings in the DB.
+2. Dollars↔cents conversion happens in exactly one module: `src/lib/pricing/money.ts`. Do not add a new parser or `Intl.NumberFormat` anywhere.
+3. Rounding: `Math.round((rateCents * minutes) / 60)`. Round once, per invoice line. Never round a rate, never round a running total.
+4. The production DB (ref `blhxzilsjuzbeoxtkbap`) is live. Migrations must be additive-or-widening, must state their backfill, and must carry verified DOWN SQL in the header comment. **One human-approved exception, 2026-09-18 (ARCH-1): `jobs.base_price_cents` is renamed to `hourly_rate_cents` via `ALTER TABLE ... RENAME COLUMN` — never drop-and-add.** No other destructive change is authorized; if you think you need one, stop and report.
+5. Never run `supabase db push`, `supabase link`, or any command touching the remote project. Local only: `supabase start`, `supabase db reset`. Deployment is a human step outside this plan.
+6. Never commit. Leave the working tree dirty for human review.
+7. No silent data loss: a migration that would change an existing stored amount must instead report the discrepancy and stop. **Exception, 2026-09-18 (ARCH-1): the §4 rename reinterprets each job's stored number from a per-visit total into a per-hour rate. The number is never edited; only its meaning changes. Report the blast radius (`supabase/checks/pricing_backfill_check.sql`); never compensate for it.** §7 applies in full everywhere else — historical invoiced amounts on `invoice_appointments` and `appointments` must be preserved exactly.
+8. There is exactly one pricing concept: an hourly rate. There is no `pricing_mode` column anywhere, on any table. The only flat amount in the system is `appointments.price_override_cents`, a manual per-visit override.
+9. `src/types/database.ts` is hand-maintained. Any schema change lands with its matching hand edit in the same task. Type it to the real nullability, not the convenient one.
+10. RLS is row-level and cannot mask columns. To hide a column from employees: drop their base-table SELECT policy, add a `security_invoker=false` view carrying the row filter in its own body, then `REVOKE ALL` + `GRANT SELECT` — a definer view left writable is an RLS bypass. See `supabase/migrations/20260917120000_secure_appointment_employees_view.sql`. Do not half-do this. List the view's columns explicitly, never `SELECT *`. Dropping a base-table policy also silently empties any *other* policy whose `USING` clause reads that table — find those and repair them with a `SECURITY DEFINER` helper in the same migration.
+11. Every price is admin-only: `jobs.hourly_rate_cents`, every column of `client_job_pricing`, and `appointments.price_override_cents` / `appointments.billed_price_cents`. Employees read jobs through `jobs_employee_view` and appointments through `appointments_employee_view`, never the base tables; `client_job_pricing` gets an admin policy and no employee policy. What a client is billed and what an employee is paid are two separate numbers; the pay side is #11 and does not exist yet, so a price hidden from an employee is replaced by nothing at all.
+12. Existing conventions win over personal taste:
+    - server actions: local `requireAdminRole()` → hand-rolled `parseXFormData` → `createAdminClient()` → `revalidatePath`
+    - no zod/yup; manual `String(formData.get(...))` parsing
+    - migrations named `YYYYMMDDHHMMSS_description.sql`
+    - match each file's existing indentation (some files use tabs, some 2 spaces)
+13. No premature abstraction. Extract a helper only when a second real caller exists in this milestone.
+14. Don't add error handling for states the schema's CHECK constraints already make impossible.
+15. Tests: pure money/resolution functions get `node --test` coverage under `tests/`. Do not add a test framework dependency.
+16. **Milestone** done means: `npm run lint` clean, `npx tsc --noEmit` clean, `npm run build` succeeds, `npm test` passes, and `supabase db reset` + `npm run seed:admin` + `test-data.sql` prove themselves **by row counts queried afterwards, never by an exit code or console output**. Corrected 2026-09-18: no Supabase client here is parameterized with the `Database` generic, so the rename produces **zero** type errors — `tsc` is clean in every phase, including Phase 1. A green `tsc` therefore proves nothing about the rename sweep; the evidence is REQ-004's grep plus loading each affected page (REQ-021). Phase 1 has its own narrower gate; see `ROADMAP.md`.
+17. Scope discipline: employee↔job payroll rates (#11) and automated invoicing (#12) are out. Do not build toward them; just do not foreclose them.

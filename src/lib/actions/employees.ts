@@ -9,7 +9,12 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/server'
 type EmployeeFieldErrors = {
   email?: string
   full_name?: string
+  started_at?: string
+  e_transfer_email?: string
 }
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 export type EmployeeActionResult =
   | { success: true; data?: { id?: string; email?: string } }
@@ -23,6 +28,9 @@ type ParsedInviteInput = {
 type ParsedEmployeeUpdateInput = {
   full_name: string
   phone: string | null
+  started_at: string | null
+  address: string | null
+  e_transfer_email: string | null
   is_active: boolean
 }
 
@@ -58,11 +66,8 @@ function parseInviteFormData(formData: FormData):
 
   if (!email) {
     fieldErrors.email = 'Email is required.'
-  } else {
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailPattern.test(email)) {
-      fieldErrors.email = 'Enter a valid email address.'
-    }
+  } else if (!EMAIL_PATTERN.test(email)) {
+    fieldErrors.email = 'Enter a valid email address.'
   }
 
   if (!fullName) {
@@ -91,12 +96,25 @@ function parseUpdateFormData(formData: FormData):
   | { success: false; error: string; fieldErrors: EmployeeFieldErrors } {
   const fullName = String(formData.get('full_name') ?? '').trim()
   const phoneRaw = String(formData.get('phone') ?? '').trim()
+  const startedAtRaw = String(formData.get('started_at') ?? '').trim()
+  const addressRaw = String(formData.get('address') ?? '').trim()
+  const eTransferEmailRaw = String(formData.get('e_transfer_email') ?? '')
+    .trim()
+    .toLowerCase()
   const isActive = formData.get('is_active') === 'on'
 
   const fieldErrors: EmployeeFieldErrors = {}
 
   if (!fullName) {
     fieldErrors.full_name = 'Full name is required.'
+  }
+
+  if (startedAtRaw && !isCalendarDate(startedAtRaw)) {
+    fieldErrors.started_at = 'Enter a valid date.'
+  }
+
+  if (eTransferEmailRaw && !EMAIL_PATTERN.test(eTransferEmailRaw)) {
+    fieldErrors.e_transfer_email = 'Enter a valid email address.'
   }
 
   if (Object.keys(fieldErrors).length > 0) {
@@ -112,9 +130,23 @@ function parseUpdateFormData(formData: FormData):
     data: {
       full_name: fullName,
       phone: phoneRaw || null,
+      started_at: startedAtRaw || null,
+      address: addressRaw || null,
+      e_transfer_email: eTransferEmailRaw || null,
       is_active: isActive,
     },
   }
+}
+
+function isCalendarDate(value: string): boolean {
+  let valid = false
+
+  if (ISO_DATE_PATTERN.test(value)) {
+    const parsed = new Date(`${value}T00:00:00Z`)
+    valid = !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value)
+  }
+
+  return valid
 }
 
 export async function inviteEmployee(formData: FormData): Promise<EmployeeActionResult>

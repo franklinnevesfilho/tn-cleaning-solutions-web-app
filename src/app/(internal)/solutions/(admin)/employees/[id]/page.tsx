@@ -14,6 +14,9 @@ type EmployeeRow = {
 	id: string
 	full_name: string
 	phone: string | null
+	started_at: string | null
+	address: string | null
+	e_transfer_email: string | null
 	is_active: boolean
 	is_archived: boolean
 }
@@ -53,7 +56,9 @@ export default async function EmployeeDetailPage({ params }: EmployeeDetailPageP
 		await Promise.all([
 			supabase
 				.from('employees')
-				.select('id, full_name, phone, is_active, is_archived')
+				.select(
+					'id, full_name, phone, started_at, address, e_transfer_email, is_active, is_archived'
+				)
 				.eq('id', id)
 				.maybeSingle(),
 			supabase
@@ -129,6 +134,26 @@ export default async function EmployeeDetailPage({ params }: EmployeeDetailPageP
 					<div>
 						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Status</p>
 						<p className="mt-1 text-sm text-neutral-700">{employee.is_active ? 'Active' : 'Inactive'}</p>
+					</div>
+					<div>
+						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Started At</p>
+						<p className="mt-1 text-sm text-neutral-700">
+							{employee.started_at
+								? format(new Date(`${employee.started_at}T00:00:00`), 'MMM d, yyyy')
+								: 'No start date on file'}
+						</p>
+					</div>
+					<div>
+						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Address</p>
+						<p className="mt-1 text-sm text-neutral-700">{employee.address || 'No address on file'}</p>
+					</div>
+					<div>
+						<p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+							E-transfer Email
+						</p>
+						<p className="mt-1 text-sm text-neutral-700">
+							{employee.e_transfer_email || 'No e-transfer email on file'}
+						</p>
 					</div>
 				</div>
 			</section>

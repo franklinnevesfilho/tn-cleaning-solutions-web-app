@@ -144,9 +144,9 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
           <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {loadError.message}
           </section>
-        ) : typedAppointment.status === 'completed' || typedAppointment.status === 'cancelled' ? (
+        ) : typedAppointment.status === 'completed' ? (
           <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            This appointment cannot be edited because it has already been {typedAppointment.status}.
+            This appointment cannot be edited because it has already been completed.
           </section>
         ) : (
           <AppointmentForm

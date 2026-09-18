@@ -69,10 +69,19 @@ function formatDuration(hours: number, minutes: number): string {
 }
 
 function compareRecords(left: TimeSheetRecord, right: TimeSheetRecord) {
-	const leftDate = new Date(`${left.appointments.scheduled_date}T${left.clocked_in_at ?? '00:00:00'}`)
-	const rightDate = new Date(`${right.appointments.scheduled_date}T${right.clocked_in_at ?? '00:00:00'}`)
+	let result: number
 
-	return rightDate.getTime() - leftDate.getTime()
+	if (left.clocked_in_at === null && right.clocked_in_at === null) {
+		result = 0
+	} else if (left.clocked_in_at === null) {
+		result = 1
+	} else if (right.clocked_in_at === null) {
+		result = -1
+	} else {
+		result = new Date(right.clocked_in_at).getTime() - new Date(left.clocked_in_at).getTime()
+	}
+
+	return result
 }
 
 function parseMonth(month: string | string[] | undefined) {
@@ -144,6 +153,8 @@ export default async function AdminTimeSheetsPage({
 			`
 		)
 		.not('clocked_in_at', 'is', null)
+		.gte('appointments.scheduled_date', monthStartLabel)
+		.lte('appointments.scheduled_date', monthEndLabel)
 
 	if (activeEmployeeId) {
 		timeSheetsQuery = timeSheetsQuery.eq('employee_id', activeEmployeeId)
@@ -155,13 +166,7 @@ export default async function AdminTimeSheetsPage({
 		console.error('Error fetching time sheets:', error)
 	}
 
-	const records = ((timeSheets ?? []) as unknown as TimeSheetRecord[])
-		.filter(
-			(record) =>
-				record.appointments.scheduled_date >= monthStartLabel &&
-				record.appointments.scheduled_date <= monthEndLabel
-		)
-		.sort(compareRecords)
+	const records = ((timeSheets ?? []) as unknown as TimeSheetRecord[]).sort(compareRecords)
 
 	const totalAppointments = records.length
 	const totalMinutes = records.reduce(

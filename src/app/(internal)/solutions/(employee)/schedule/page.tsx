@@ -13,6 +13,7 @@ import { format, isSameDay, parseISO, startOfDay, subDays } from 'date-fns'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase/server'
 import { cn } from '@/lib/utils'
+import type { Views } from '@/types/database'
 
 type AppointmentStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
 
@@ -48,11 +49,7 @@ type TeamMemberRecord = {
 	appointment_id: string
 	clocked_in_at: string | null
 	clocked_out_at: string | null
-	employees: {
-		id: string
-		full_name: string
-		phone: string | null
-	}
+	employees_employee_view: Pick<Views<'employees_employee_view'>, 'id' | 'full_name' | 'phone'>
 }
 
 type EmployeeSummary = {
@@ -435,13 +432,13 @@ export default async function SchedulePage() {
 	}
 
 	const { data: currentAssignments, error: appointmentsError } = await supabase
-		.from('appointment_employees')
+		.from('appointment_employees_employee_view')
 		.select(
 			`
 				appointment_id,
 				clocked_in_at,
 				clocked_out_at,
-				appointments!inner (
+				appointments:appointments_employee_view!inner (
 					id,
 					scheduled_date,
 					scheduled_start_time,
@@ -456,7 +453,7 @@ export default async function SchedulePage() {
 						label,
 						address
 					),
-					jobs!inner (
+					jobs:jobs_employee_view!inner (
 						name,
 						description
 					)
@@ -482,13 +479,13 @@ export default async function SchedulePage() {
 
 	const { data: allTeamRows, error: teamError } = appointmentIds.length
 		? await supabase
-			.from('appointment_employees')
+			.from('appointment_employees_employee_view')
 			.select(
 				`
 					appointment_id,
 					clocked_in_at,
 					clocked_out_at,
-					employees!inner (
+					employees_employee_view!inner (
 						id,
 						full_name,
 						phone
@@ -518,11 +515,11 @@ export default async function SchedulePage() {
 
 	const appointments: AppointmentWithTeam[] = appointmentRows.map((row) => {
 		const teamMembers = teamByAppointment.get(row.appointment_id) ?? []
-		const currentUserTeamMember = teamMembers.find((member) => member.employees.id === currentEmployee.id)
+		const currentUserTeamMember = teamMembers.find((member) => member.employees_employee_view.id === currentEmployee.id)
 		const normalizedTeamMembers = teamMembers.map((member) => ({
-			id: member.employees.id,
-			full_name: member.employees.full_name,
-			phone: member.employees.phone,
+			id: member.employees_employee_view.id,
+			full_name: member.employees_employee_view.full_name,
+			phone: member.employees_employee_view.phone,
 			clocked_in_at: member.clocked_in_at,
 			clocked_out_at: member.clocked_out_at,
 			clockStatus: getClockStatus(member.clocked_in_at, member.clocked_out_at),

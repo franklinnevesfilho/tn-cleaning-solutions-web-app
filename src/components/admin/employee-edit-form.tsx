@@ -14,6 +14,9 @@ type EmployeeEditFormProps = {
     id: string
     full_name: string
     phone: string | null
+    started_at: string | null
+    address: string | null
+    e_transfer_email: string | null
     is_active: boolean
   }
 }
@@ -22,6 +25,9 @@ const initialState: EmployeeActionResult = {
   success: false,
   error: '',
 }
+
+const inputClassName =
+  'h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20'
 
 function SubmitButton() {
   const { pending } = useFormStatus()
@@ -67,7 +73,7 @@ export function EmployeeEditForm({ employee }: EmployeeEditFormProps) {
             aria-describedby={
               'fieldErrors' in state && state.fieldErrors?.full_name ? 'full-name-error' : undefined
             }
-            className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
+            className={inputClassName}
             placeholder="Alex Johnson"
           />
           {'fieldErrors' in state && state.fieldErrors?.full_name ? (
@@ -86,9 +92,70 @@ export function EmployeeEditForm({ employee }: EmployeeEditFormProps) {
             name="phone"
             type="tel"
             defaultValue={employee.phone ?? ''}
-            className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
+            className={inputClassName}
             placeholder="(615) 555-0100"
           />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="started_at" className="text-sm font-medium text-neutral-700">
+            Started At
+          </Label>
+          <Input
+            id="started_at"
+            name="started_at"
+            type="date"
+            defaultValue={employee.started_at ?? ''}
+            aria-invalid={'fieldErrors' in state && Boolean(state.fieldErrors?.started_at)}
+            aria-describedby={
+              'fieldErrors' in state && state.fieldErrors?.started_at ? 'started-at-error' : undefined
+            }
+            className={inputClassName}
+          />
+          {'fieldErrors' in state && state.fieldErrors?.started_at ? (
+            <p id="started-at-error" className="text-xs text-red-600">
+              {state.fieldErrors.started_at}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="address" className="text-sm font-medium text-neutral-700">
+            Address
+          </Label>
+          <Input
+            id="address"
+            name="address"
+            type="text"
+            defaultValue={employee.address ?? ''}
+            className={inputClassName}
+            placeholder="123 Main Street, Nashville, TN"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="e_transfer_email" className="text-sm font-medium text-neutral-700">
+            E-transfer Email
+          </Label>
+          <Input
+            id="e_transfer_email"
+            name="e_transfer_email"
+            type="email"
+            defaultValue={employee.e_transfer_email ?? ''}
+            aria-invalid={'fieldErrors' in state && Boolean(state.fieldErrors?.e_transfer_email)}
+            aria-describedby={
+              'fieldErrors' in state && state.fieldErrors?.e_transfer_email
+                ? 'e-transfer-email-error'
+                : undefined
+            }
+            className={inputClassName}
+            placeholder="alex@example.com"
+          />
+          {'fieldErrors' in state && state.fieldErrors?.e_transfer_email ? (
+            <p id="e-transfer-email-error" className="text-xs text-red-600">
+              {state.fieldErrors.e_transfer_email}
+            </p>
+          ) : null}
         </div>
 
         <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-3">
