@@ -1,19 +1,13 @@
-/**
- * Seed admin and employee users using Supabase Admin API
- * 
- * This script creates users with proper password hashing
- * Run with: npm run seed:admin
- */
-
 import { config } from 'dotenv'
 import { resolve } from 'path'
 import { createClient } from '@supabase/supabase-js'
 
-// Load environment variables from .env.local
 config({ path: resolve(process.cwd(), '.env.local') })
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const localHostnames = ['127.0.0.1', 'localhost']
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!supabaseUrl || !supabaseServiceKey) {
   console.error('❌ Missing required environment variables')
@@ -21,6 +15,27 @@ if (!supabaseUrl || !supabaseServiceKey) {
   console.error('   SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? '✓' : '✗')
   process.exit(1)
 }
+
+const targetHost = URL.parse(supabaseUrl)?.hostname ?? null
+
+// SECURITY — do not remove. This script resets known-plaintext passwords and upserts seed rows
+// with a service-role key, which bypasses RLS. On 2026-09-18 it was run twice against the LIVE
+// project because `.env.local` points at production and nothing stopped it. The guard fails
+// closed: a URL that will not parse is treated as remote, not as local.
+if (targetHost === null || !localHostnames.includes(targetHost)) {
+  console.error('❌ Refusing to seed: target is not a local Supabase stack.')
+  console.error(`   NEXT_PUBLIC_SUPABASE_URL: ${supabaseUrl}`)
+  console.error(`   resolved host: ${targetHost ?? '<unparseable>'}`)
+  console.error(`   allowed hosts: ${localHostnames.join(', ')}`)
+  console.error('   This script resets passwords and writes rows with a service-role key.')
+  console.error('   Take the URL and secret key from `npx supabase status` and pass them in:')
+  console.error(
+    '   NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SERVICE_ROLE_KEY=<local secret> npm run seed:admin'
+  )
+  process.exit(1)
+}
+
+console.log(`🎯 Seed target: ${supabaseUrl} (host ${targetHost})\n`)
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
@@ -37,12 +52,26 @@ interface User {
   phone?: string
 }
 
+interface SeededRowCheck {
+  label: string
+  table: string
+  match: Record<string, string>
+  minimum: number
+}
+
 const users: User[] = [
   {
     email: 'franklin.neves.filho@gmail.com',
     password: 'admin123',
     fullName: 'Franklin Neves Filho',
     role: 'admin',
+  },
+  {
+    email: 'franklin.neves.filho+employee@gmail.com',
+    password: 'employee123',
+    fullName: 'Franklin Neves Filho (Employee)',
+    role: 'employee',
+    phone: '(615) 555-0124',
   },
   {
     email: 'sarah.johnson@tncleaningsolutions.com',
@@ -53,140 +82,183 @@ const users: User[] = [
   },
 ]
 
+const today = new Date().toISOString().split('T')[0]
+
+const seededRowChecks: SeededRowCheck[] = [
+  {
+    label: 'public.employees',
+    table: 'employees',
+    match: {},
+    minimum: users.length,
+  },
+  {
+    label: "public.clients name='Johnson Family'",
+    table: 'clients',
+    match: { name: 'Johnson Family' },
+    minimum: 1,
+  },
+  {
+    label: "public.jobs name='Standard House Cleaning'",
+    table: 'jobs',
+    match: { name: 'Standard House Cleaning' },
+    minimum: 1,
+  },
+  {
+    label: `public.appointments scheduled_date=${today} 09:00`,
+    table: 'appointments',
+    match: { scheduled_date: today, scheduled_start_time: '09:00:00' },
+    minimum: 1,
+  },
+  {
+    label: 'public.appointment_employees',
+    table: 'appointment_employees',
+    match: {},
+    minimum: 1,
+  },
+]
+
+const failures: string[] = []
+
+function fail(message: string) {
+  failures.push(message)
+  console.error(`   ❌ ${message}`)
+}
+
 async function seedUsers() {
   console.log('🌱 Seeding users...\n')
+
+  const { data: existing, error: listError } = await supabase.auth.admin.listUsers()
+
+  if (listError) {
+    fail(`Could not list auth users: ${listError.message}`)
+    return
+  }
 
   for (const user of users) {
     const roleEmoji = user.role === 'admin' ? '👑' : '👤'
     console.log(`${roleEmoji} Processing ${user.email} (${user.role})...`)
 
-    // Check if user already exists
-    const { data: existingUser } = await supabase.auth.admin.listUsers()
-    const userExists = existingUser?.users.some((u) => u.email === user.email)
+    const existingUser = existing.users.find((u) => u.email === user.email)
 
-    if (userExists) {
+    if (existingUser) {
       console.log(`   ⚠️  User already exists, updating...`)
 
-      // Get user ID
-      const existingUserData = existingUser?.users.find((u) => u.email === user.email)
-      if (existingUserData) {
-        // Update user metadata to ensure correct role
-        const { error: updateError } = await supabase.auth.admin.updateUserById(
-          existingUserData.id,
-          {
-            app_metadata: { role: user.role },
-            password: user.password, // Update password
-          }
-        )
-
-        if (updateError) {
-          console.error(`   ❌ Failed to update user: ${updateError.message}`)
-          continue
-        }
-
-        // Ensure employee record exists
-        const { error: employeeError } = await supabase
-          .from('employees')
-          .upsert(
-            {
-              user_id: existingUserData.id,
-              full_name: user.fullName,
-              phone: user.phone || null,
-              is_active: true,
-            },
-            {
-              onConflict: 'user_id',
-            }
-          )
-
-        if (employeeError) {
-          console.error(`   ⚠️  Employee record error: ${employeeError.message}`)
-        }
-
-        console.log(`   ✅ Updated successfully`)
-      }
-    } else {
-      // Create new user
-      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
-        email: user.email,
-        password: user.password,
-        email_confirm: true,
+      const { error: updateError } = await supabase.auth.admin.updateUserById(existingUser.id, {
         app_metadata: { role: user.role },
+        password: user.password,
       })
 
-      if (createError) {
-        console.error(`   ❌ Failed to create user: ${createError.message}`)
+      if (updateError) {
+        fail(`Failed to update user ${user.email}: ${updateError.message}`)
         continue
       }
 
-      if (newUser.user) {
-        // Create employee record
-        const { error: employeeError } = await supabase.from('employees').insert({
-          user_id: newUser.user.id,
+      const { error: employeeError } = await supabase.from('employees').upsert(
+        {
+          user_id: existingUser.id,
           full_name: user.fullName,
           phone: user.phone || null,
           is_active: true,
-        })
-
-        if (employeeError) {
-          console.error(`   ⚠️  Employee record error: ${employeeError.message}`)
+        },
+        {
+          onConflict: 'user_id',
         }
+      )
 
-        console.log(`   ✅ Created successfully`)
+      if (employeeError) {
+        fail(`Failed to upsert employee record for ${user.email}: ${employeeError.message}`)
+        continue
       }
+
+      console.log(`   ✅ Updated successfully`)
+      continue
     }
+
+    const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+      email: user.email,
+      password: user.password,
+      email_confirm: true,
+      app_metadata: { role: user.role },
+    })
+
+    if (createError) {
+      fail(`Failed to create user ${user.email}: ${createError.message}`)
+      continue
+    }
+
+    if (!newUser.user) {
+      fail(`Created user ${user.email} but the Admin API returned no user record`)
+      continue
+    }
+
+    const { error: employeeError } = await supabase.from('employees').insert({
+      user_id: newUser.user.id,
+      full_name: user.fullName,
+      phone: user.phone || null,
+      is_active: true,
+    })
+
+    if (employeeError) {
+      fail(`Failed to create employee record for ${user.email}: ${employeeError.message}`)
+      continue
+    }
+
+    console.log(`   ✅ Created successfully`)
   }
-
-  console.log('\n✨ Done! All users are ready.')
-
-  // Create test appointment data
-  await seedTestData()
-
-  console.log('\n📋 Test Users:')
-  console.log('   Admin:')
-  console.log('   - franklin.neves.filho@gmail.com / admin123')
-  console.log('\n   Employees:')
-  console.log('   - sarah.johnson@tncleaningsolutions.com / employee123')
-  console.log('\n⚠️  SECURITY WARNING:')
-  console.log('   Change default passwords immediately in production!')
 }
 
 async function seedTestData() {
   console.log('\n🧪 Creating test appointment data...\n')
 
-  // Get employee IDs
-  const { data: franklinUser } = await supabase.auth.admin.listUsers()
-  const franklinAuthUser = franklinUser?.users.find(
-    (u) => u.email === 'franklin.neves.filho@gmail.com'
-  )
-  const sarahAuthUser = franklinUser?.users.find(
+  const { data: authUsers, error: listError } = await supabase.auth.admin.listUsers()
+
+  if (listError) {
+    fail(`Could not list auth users while seeding test data: ${listError.message}`)
+    return
+  }
+
+  const sarahAuthUser = authUsers.users.find(
     (u) => u.email === 'sarah.johnson@tncleaningsolutions.com'
   )
 
-  if (!franklinAuthUser || !sarahAuthUser) {
-    console.log('   ⚠️  Skipping test data - employee users not found')
+  if (!sarahAuthUser) {
+    fail('Cannot seed test data: sarah.johnson@tncleaningsolutions.com is missing from auth.users')
     return
   }
 
-  const { data: sarahEmployee } = await supabase
+  const { data: sarahEmployee, error: sarahEmployeeError } = await supabase
     .from('employees')
     .select('id')
     .eq('user_id', sarahAuthUser.id)
-    .single()
+    .maybeSingle()
 
-  if (!sarahEmployee) {
-    console.log('   ⚠️  Skipping test data - employee records not found')
+  if (sarahEmployeeError) {
+    fail(`Failed to read Sarah's employee record: ${sarahEmployeeError.message}`)
     return
   }
 
-  // Check if test client exists, create if not
-  let { data: client } = await supabase
+  if (!sarahEmployee) {
+    fail("Cannot seed test data: Sarah's public.employees row is missing")
+    return
+  }
+
+  const { data: existingClient, error: clientReadError } = await supabase
     .from('clients')
     .select('id')
     .eq('name', 'Johnson Family')
     .maybeSingle()
 
-  if (!client) {
+  if (clientReadError) {
+    fail(`Failed to read test client: ${clientReadError.message}`)
+    return
+  }
+
+  let clientId: string
+
+  if (existingClient) {
+    clientId = existingClient.id
+    console.log('   ℹ️  Using existing test client: Johnson Family')
+  } else {
     const { data: newClient, error: clientError } = await supabase
       .from('clients')
       .insert({
@@ -197,72 +269,81 @@ async function seedTestData() {
         notes: 'Weekly cleaning, has a friendly golden retriever named Max',
         is_active: true,
       })
-      .select()
+      .select('id')
       .single()
 
     if (clientError) {
-      console.error(`   ❌ Failed to create client: ${clientError.message}`)
+      fail(`Failed to create client Johnson Family: ${clientError.message}`)
       return
     }
 
-    client = newClient
+    clientId = newClient.id
     console.log('   ✅ Created test client: Johnson Family')
-  } else {
-    console.log('   ℹ️  Using existing test client: Johnson Family')
   }
 
-  // Check if test job exists, create if not
-  let { data: job } = await supabase
+  const { data: existingJob, error: jobReadError } = await supabase
     .from('jobs')
     .select('id')
     .eq('name', 'Standard House Cleaning')
     .maybeSingle()
 
-  if (!job) {
+  if (jobReadError) {
+    fail(`Failed to read test job: ${jobReadError.message}`)
+    return
+  }
+
+  let jobId: string
+
+  if (existingJob) {
+    jobId = existingJob.id
+    console.log('   ℹ️  Using existing test job: Standard House Cleaning')
+  } else {
     const { data: newJob, error: jobError } = await supabase
       .from('jobs')
       .insert({
         name: 'Standard House Cleaning',
         description:
           'Complete house cleaning including kitchen, bathrooms, living areas, and bedrooms',
-        base_price_cents: 15000,
+        hourly_rate_cents: 4500,
         estimated_duration_minutes: 120,
       })
-      .select()
+      .select('id')
       .single()
 
     if (jobError) {
-      console.error(`   ❌ Failed to create job: ${jobError.message}`)
+      fail(`Failed to create job Standard House Cleaning: ${jobError.message}`)
       return
     }
 
-    job = newJob
+    jobId = newJob.id
     console.log('   ✅ Created test job: Standard House Cleaning')
-  } else {
-    console.log('   ℹ️  Using existing test job: Standard House Cleaning')
   }
 
-  // Get today's date in YYYY-MM-DD format
-  const today = new Date().toISOString().split('T')[0]
-
-  // Check if appointment already exists for today
-  const { data: existingAppointment } = await supabase
+  const { data: existingAppointment, error: appointmentReadError } = await supabase
     .from('appointments')
     .select('id')
-    .eq('client_id', client?.id)
-    .eq('job_id', job?.id)
+    .eq('client_id', clientId)
+    .eq('job_id', jobId)
     .eq('scheduled_date', today)
     .eq('scheduled_start_time', '09:00:00')
     .maybeSingle()
 
-  let appointment = existingAppointment
+  if (appointmentReadError) {
+    fail(`Failed to read test appointment: ${appointmentReadError.message}`)
+    return
+  }
 
-  if (!appointment) {
+  let appointmentId: string
+
+  if (existingAppointment) {
+    appointmentId = existingAppointment.id
+    console.log(`   ℹ️  Using existing test appointment for today (${today})`)
+  } else {
     const { data: newAppointment, error: appointmentError } = await supabase
       .from('appointments')
       .insert({
-        client_id: client?.id,
-        job_id: job?.id,
+        client_id: clientId,
+        job_id: jobId,
         scheduled_date: today,
         scheduled_start_time: '09:00:00',
         scheduled_end_time: '11:00:00',
@@ -270,41 +351,116 @@ async function seedTestData() {
         notes:
           'First visit - client will leave the key under the front door mat. The dog is friendly but energetic.',
       })
-      .select()
+      .select('id')
       .single()
 
     if (appointmentError) {
-      console.error(`   ❌ Failed to create appointment: ${appointmentError.message}`)
+      fail(`Failed to create test appointment: ${appointmentError.message}`)
       return
     }
 
-    appointment = newAppointment
+    appointmentId = newAppointment.id
     console.log(`   ✅ Created test appointment for today (${today}) at 9:00 AM`)
-  } else {
-    console.log(`   ℹ️  Using existing test appointment for today (${today})`)
   }
 
-  const { error: sarahAssignError } = await supabase
+  // appointment_employees has no unique constraint on (appointment_id, employee_id), so an
+  // unguarded insert duplicates the assignment on every run. Read first, exactly as the client,
+  // job and appointment steps above do.
+  const { data: existingAssignment, error: assignmentReadError } = await supabase
     .from('appointment_employees')
-    .insert({
-      appointment_id: appointment?.id,
-      employee_id: sarahEmployee.id,
-    })
+    .select('id')
+    .eq('appointment_id', appointmentId)
+    .eq('employee_id', sarahEmployee.id)
+    .maybeSingle()
 
-  if (sarahAssignError && sarahAssignError.code !== '23505') {
-    // Ignore duplicate key errors
-    console.error(`   ⚠️  Failed to assign Sarah: ${sarahAssignError.message}`)
-  } else if (sarahAssignError?.code === '23505') {
-    console.log('   ℹ️  Sarah already assigned')
-  } else {
-    console.log('   ✅ Assigned Sarah to appointment')
+  if (assignmentReadError) {
+    fail(`Failed to read Sarah's appointment assignment: ${assignmentReadError.message}`)
+    return
   }
 
-  console.log('\n🎉 Test data created successfully!')
+  if (existingAssignment) {
+    console.log('   ℹ️  Sarah already assigned')
+    return
+  }
+
+  const { error: sarahAssignError } = await supabase.from('appointment_employees').insert({
+    appointment_id: appointmentId,
+    employee_id: sarahEmployee.id,
+  })
+
+  if (sarahAssignError) {
+    fail(`Failed to assign Sarah to the test appointment: ${sarahAssignError.message}`)
+    return
+  }
+
+  console.log('   ✅ Assigned Sarah to appointment')
 }
 
-seedUsers()
-  .then(() => process.exit(0))
+async function verifySeededRows() {
+  console.log('\n🔎 Re-reading what the seed claims to have written...\n')
+
+  const { data: authUsers, error: listError } = await supabase.auth.admin.listUsers()
+
+  if (listError) {
+    fail(`Could not verify auth.users: ${listError.message}`)
+  } else {
+    console.log(`   auth.users: ${authUsers.users.length}`)
+
+    if (authUsers.users.length < users.length) {
+      fail(`auth.users has ${authUsers.users.length} row(s), expected at least ${users.length}`)
+    }
+  }
+
+  for (const check of seededRowChecks) {
+    let query = supabase.from(check.table).select('*', { count: 'exact', head: true })
+
+    for (const [column, value] of Object.entries(check.match)) {
+      query = query.eq(column, value)
+    }
+
+    const { count, error } = await query
+
+    if (error) {
+      fail(`Could not verify ${check.label}: ${error.message}`)
+      continue
+    }
+
+    console.log(`   ${check.label}: ${count ?? 0}`)
+
+    if ((count ?? 0) < check.minimum) {
+      fail(`${check.label} has ${count ?? 0} row(s), expected at least ${check.minimum}`)
+    }
+  }
+}
+
+async function main() {
+  await seedUsers()
+  await seedTestData()
+  await verifySeededRows()
+
+  console.log('\n📋 Test Users:')
+  console.log('   Admin:')
+  console.log('   - franklin.neves.filho@gmail.com / admin123')
+  console.log('\n   Employees:')
+  console.log('   - franklin.neves.filho+employee@gmail.com / employee123')
+  console.log('   - sarah.johnson@tncleaningsolutions.com / employee123')
+}
+
+main()
+  .then(() => {
+    if (failures.length > 0) {
+      console.error(`\n💥 Seed FAILED — ${failures.length} problem(s):`)
+
+      for (const failure of failures) {
+        console.error(`   - ${failure}`)
+      }
+
+      process.exit(1)
+    }
+
+    console.log('\n✨ Done! All users and test data are in place.')
+    process.exit(0)
+  })
   .catch((error) => {
     console.error('💥 Fatal error:', error)
     process.exit(1)

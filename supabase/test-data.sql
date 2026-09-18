@@ -6,6 +6,7 @@ DECLARE
 	sarah_employee_id UUID;
 	test_client_id UUID;
 	test_job_id UUID;
+	test_deep_clean_job_id UUID;
 	test_appointment_id UUID;
 	test_location_id UUID;
 BEGIN
@@ -85,13 +86,13 @@ BEGIN
 	INSERT INTO public.jobs (
 		name,
 		description,
-		base_price_cents,
+		hourly_rate_cents,
 		estimated_duration_minutes
 	)
 	SELECT
 		'Standard House Cleaning',
 		'Complete house cleaning including kitchen, bathrooms, living areas, and bedrooms',
-		15000,
+		4500,
 		120
 	WHERE NOT EXISTS (
 		SELECT 1
@@ -105,6 +106,57 @@ BEGIN
 		FROM public.jobs
 		WHERE name = 'Standard House Cleaning'
 		LIMIT 1;
+	END IF;
+
+	-- A second job at a different rate, so every pricing screen has two rates to tell apart.
+	INSERT INTO public.jobs (
+		name,
+		description,
+		hourly_rate_cents,
+		estimated_duration_minutes
+	)
+	SELECT
+		'Hourly Deep Clean',
+		'Deep clean billed by the hour, including baseboards, interior windows, and appliance interiors',
+		6000,
+		180
+	WHERE NOT EXISTS (
+		SELECT 1
+		FROM public.jobs
+		WHERE name = 'Hourly Deep Clean'
+	)
+	RETURNING id INTO test_deep_clean_job_id;
+
+	IF test_deep_clean_job_id IS NULL THEN
+		SELECT id INTO test_deep_clean_job_id
+		FROM public.jobs
+		WHERE name = 'Hourly Deep Clean'
+		LIMIT 1;
+	END IF;
+
+	-- One negotiated client rate, below the job's standard rate, so the resolver's
+	-- client_job_pricing branch is exercised by seed data rather than only by unit tests.
+	IF test_client_id IS NOT NULL AND test_deep_clean_job_id IS NOT NULL THEN
+		INSERT INTO public.client_job_pricing (
+			client_id,
+			job_id,
+			hourly_rate_cents,
+			effective_from,
+			notes
+		)
+		SELECT
+			test_client_id,
+			test_deep_clean_job_id,
+			3800,
+			CURRENT_DATE,
+			'Loyalty rate negotiated for the Johnson Family deep clean'
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM public.client_job_pricing
+			WHERE client_id = test_client_id
+				AND job_id = test_deep_clean_job_id
+				AND effective_from = CURRENT_DATE
+		);
 	END IF;
 
 	IF test_client_id IS NOT NULL AND test_job_id IS NOT NULL THEN

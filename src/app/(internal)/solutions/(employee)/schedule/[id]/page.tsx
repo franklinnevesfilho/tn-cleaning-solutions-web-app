@@ -160,7 +160,7 @@ export default async function AppointmentDetailPage({
 				appointment_id,
 				clocked_in_at,
 				clocked_out_at,
-				appointments!inner (
+				appointments:appointments_employee_view!inner (
 					id,
 					scheduled_date,
 					scheduled_start_time,
@@ -175,7 +175,7 @@ export default async function AppointmentDetailPage({
 						label,
 						address
 					),
-					jobs!inner (
+					jobs:jobs_employee_view!inner (
 						name,
 						description
 					)

@@ -101,12 +101,12 @@ export default async function TimeSheetsPage() {
         id,
         clocked_in_at,
         clocked_out_at,
-        appointments!inner (
+        appointments:appointments_employee_view!inner (
           scheduled_date,
           clients!inner (
             name
           ),
-          jobs!inner (
+          jobs:jobs_employee_view!inner (
             name
           )
         )
