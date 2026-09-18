@@ -153,7 +153,7 @@ export default async function AppointmentDetailPage({
 	}
 
 	const { data: assignmentRows, error: assignmentError } = await supabase
-		.from('appointment_employees')
+		.from('appointment_employees_employee_view')
 		.select(
 			`
 				id,
@@ -194,7 +194,7 @@ export default async function AppointmentDetailPage({
 	const currentAssignmentId = appointment.id
 
 	const { data: teamRows } = await supabase
-		.from('appointment_employees')
+		.from('appointment_employees_employee_view')
 		.select(
 			`
 				appointment_id,

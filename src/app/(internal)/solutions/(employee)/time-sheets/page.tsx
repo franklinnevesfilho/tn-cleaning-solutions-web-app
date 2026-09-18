@@ -95,7 +95,7 @@ export default async function TimeSheetsPage() {
   const monthEndLabel = format(monthEnd, 'yyyy-MM-dd')
 
   const { data: timeSheets, error } = await supabase
-    .from('appointment_employees')
+    .from('appointment_employees_employee_view')
     .select(
       `
         id,

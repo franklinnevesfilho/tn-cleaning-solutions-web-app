@@ -432,7 +432,7 @@ export default async function SchedulePage() {
 	}
 
 	const { data: currentAssignments, error: appointmentsError } = await supabase
-		.from('appointment_employees')
+		.from('appointment_employees_employee_view')
 		.select(
 			`
 				appointment_id,
@@ -479,7 +479,7 @@ export default async function SchedulePage() {
 
 	const { data: allTeamRows, error: teamError } = appointmentIds.length
 		? await supabase
-			.from('appointment_employees')
+			.from('appointment_employees_employee_view')
 			.select(
 				`
 					appointment_id,

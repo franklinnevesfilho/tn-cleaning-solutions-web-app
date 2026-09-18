@@ -339,6 +339,18 @@ export type Database = {
       }
     }
     Views: {
+      appointment_employees_employee_view: {
+        Row: {
+          id: string
+          appointment_id: string
+          employee_id: string
+          clocked_in_at: string | null
+          clocked_out_at: string | null
+          created_at: string
+          updated_at: string
+          is_archived: boolean
+        }
+      }
       employees_employee_view: {
         Row: {
           id: string
