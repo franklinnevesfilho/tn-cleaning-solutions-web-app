@@ -12,7 +12,7 @@ Scope: whole-repo structure with deep focus on the pricing domain (jobs / appoin
 
 **App routes** (`src/app`): three route groups.
 - `(public)` — marketing page only.
-- `(auth)` — login, accept-invite, reset-password.
+- `(auth)` — login, accept-invite, forgot-password.
 - `(internal)/solutions` — gated by `src/app/(internal)/layout.tsx:1` (any authenticated user), further split:
   - `(admin)/...` — gated by `src/app/(internal)/solutions/(admin)/layout.tsx:1`; redirects to `/solutions/schedule` unless `user.app_metadata.role === 'admin'`. Contains jobs, appointments, clients, employees, invoices, dashboard, time-tracking.
   - `(employee)/...` — schedule, time-sheets. No layout gate beyond `(internal)`; separation relies on RLS.

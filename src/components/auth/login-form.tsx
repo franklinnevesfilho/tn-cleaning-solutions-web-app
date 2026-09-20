@@ -107,7 +107,7 @@ export function LoginForm({ action }: LoginFormProps) {
 
       <div className="flex items-center justify-end pt-0.5">
         <Link
-          href="/reset-password"
+          href="/forgot-password"
           className="text-sm font-medium text-emerald-700 transition-colors hover:text-emerald-800"
         >
           Forgot password?
