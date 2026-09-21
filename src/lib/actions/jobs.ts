@@ -213,23 +213,7 @@ export async function archiveJob(id: string): Promise<JobActionResult> {
     return { success: false, error: 'Job id is required.' }
   }
 
-  const authResult = await requireAdminRole()
-  if (!authResult.success) {
-    return { success: false, error: authResult.error }
-  }
-
-  const adminClient = createAdminClient()
-  const { error } = await adminClient
-    .from('jobs')
-    .update({ is_archived: true })
-    .eq('id', id)
-
-  if (error) {
-    return { success: false, error: error.message }
-  }
-
-  revalidatePath('/solutions/jobs')
-  return { success: true }
+  return setJobsArchived([id], true)
 }
 
 export async function restoreJob(id: string): Promise<JobActionResult> {
@@ -237,6 +221,26 @@ export async function restoreJob(id: string): Promise<JobActionResult> {
     return { success: false, error: 'Job id is required.' }
   }
 
+  return setJobsArchived([id], false)
+}
+
+export async function archiveJobs(ids: string[]): Promise<JobActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: 'Select at least one job to archive.' }
+  }
+
+  return setJobsArchived(ids, true)
+}
+
+export async function restoreJobs(ids: string[]): Promise<JobActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: 'Select at least one job to restore.' }
+  }
+
+  return setJobsArchived(ids, false)
+}
+
+async function setJobsArchived(ids: string[], isArchived: boolean): Promise<JobActionResult> {
   const authResult = await requireAdminRole()
   if (!authResult.success) {
     return { success: false, error: authResult.error }
@@ -245,8 +249,8 @@ export async function restoreJob(id: string): Promise<JobActionResult> {
   const adminClient = createAdminClient()
   const { error } = await adminClient
     .from('jobs')
-    .update({ is_archived: false })
-    .eq('id', id)
+    .update({ is_archived: isArchived })
+    .in('id', ids)
 
   if (error) {
     return { success: false, error: error.message }

@@ -7,6 +7,15 @@ Baseline: `improved-appointments` @ `7ae55f5`.
 
 <!-- Owned by the orchestrator. Planner does not write below this line until the next section. -->
 
+- **Out-of-milestone UI work, 2026-09-21 — jobs list/card interaction refactor.** Tier 1, not part
+  of Phases 1–3 and carrying no REQ ID. Replaced the per-card Edit pill and per-card Archive button
+  with card-click-to-edit plus a per-section "Select" mode and bulk archive/restore.
+  `src/components/admin/jobs-list.tsx` rewritten; `archiveJobs`/`restoreJobs` added to
+  `src/lib/actions/jobs.ts` (single `.in('id', ids)` round trip). `verifier`: PASS against 10
+  acceptance criteria. `/code-review high`: no findings in either changed file. **Uncommitted**
+  (working tree at `b0096cb`), and **not exercised in a browser** — the select-mode checkbox
+  double-toggle fix is verified by source reading only. Next action: user runs a manual browser
+  pass of `/solutions/jobs` on desktop and a small viewport.
 - **Current phase**: **Phases 1, 2 and 3 all implemented as of 2026-09-21, including `03-02`
   (REQ-023).** Remaining before the milestone can be called done: the **REQ-021 browser walk** and
   Phase 3's CRUD smoke, which the **user is running manually** — no agent will run them; plus the
