@@ -8,6 +8,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import type { AppointmentSummary } from '@/components/admin/appointments-types'
 import { Button } from '@/components/ui/button'
+import { formatCents } from '@/lib/pricing/money'
 import { cn } from '@/lib/utils'
 
 type AppointmentsListProps = {
@@ -109,14 +110,24 @@ export function AppointmentsList({ appointments, month, year }: AppointmentsList
                           {appointment.scheduled_start_time.slice(0, 5)} - {appointment.scheduled_end_time.slice(0, 5)}
                         </p>
                       </div>
-                      <span
-                        className={cn(
-                          'rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-wide',
-                          statusClasses(appointment.status)
-                        )}
-                      >
-                        {appointment.status.replace('_', ' ')}
-                      </span>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <span
+                          className={cn(
+                            'rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-wide',
+                            statusClasses(appointment.status)
+                          )}
+                        >
+                          {appointment.status.replace('_', ' ')}
+                        </span>
+                        <p className="text-sm font-semibold text-neutral-900">
+                          {formatCents(appointment.price_display_cents)}
+                        </p>
+                        {appointment.price_is_billed ? (
+                          <span className="rounded-full border border-neutral-200 bg-neutral-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-700">
+                            Invoiced
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
 
                     {appointment.assignedEmployees.length > 0 ? (

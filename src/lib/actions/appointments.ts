@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { parseDollarsToCents } from '@/lib/pricing/money'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import type { TablesInsert } from '@/types/database'
@@ -77,19 +78,6 @@ function compareTimes(start: string, end: string) {
   const [startHour, startMinute] = start.split(':').map(Number)
   const [endHour, endMinute] = end.split(':').map(Number)
   return endHour * 60 + endMinute - (startHour * 60 + startMinute)
-}
-
-function parseMoneyToCents(raw: string): number | null | 'invalid' {
-  if (!raw) {
-    return null
-  }
-
-  const parsed = Number(raw)
-  if (Number.isNaN(parsed) || !Number.isFinite(parsed) || parsed < 0) {
-    return 'invalid'
-  }
-
-  return Math.round(parsed * 100)
 }
 
 function parsePositiveInt(raw: string): number | null | 'invalid' {
@@ -242,12 +230,10 @@ function parseCreateAppointmentFormData(formData: FormData):
     fieldErrors.scheduled_end_time = 'End time must be after start time.'
   }
 
-  const parsedPrice = parseMoneyToCents(priceOverride)
-  if (parsedPrice === 'invalid') {
+  const priceOverrideCents = priceOverride ? parseDollarsToCents(priceOverride) : null
+  if (priceOverride && priceOverrideCents === null) {
     fieldErrors.price_override = 'Enter a valid dollar amount.'
   }
-
-  const priceOverrideCents = parsedPrice === 'invalid' ? null : parsedPrice
 
   let recurrenceFrequency: RecurrenceFrequency | null = null
   if (isRecurring) {
@@ -355,12 +341,10 @@ function parseUpdateAppointmentFormData(formData: FormData):
     fieldErrors.scheduled_end_time = 'End time must be after start time.'
   }
 
-  const parsedPrice = parseMoneyToCents(priceOverride)
-  if (parsedPrice === 'invalid') {
+  const priceOverrideCents = priceOverride ? parseDollarsToCents(priceOverride) : null
+  if (priceOverride && priceOverrideCents === null) {
     fieldErrors.price_override = 'Enter a valid dollar amount.'
   }
-
-  const priceOverrideCents = parsedPrice === 'invalid' ? null : parsedPrice
 
   if (
     statusRaw !== 'scheduled' &&
@@ -844,7 +828,9 @@ export async function updateAppointment(
             scheduled_date: scheduledDate,
             scheduled_start_time: appointment.scheduled_start_time,
             scheduled_end_time: appointment.scheduled_end_time,
-            price_override_cents: appointment.price_override_cents,
+            // REQ-014 / DET-2: a regenerated occurrence never inherits the source occurrence's
+            // manual override, and has never been invoiced, so billed_price_cents stays unset.
+            price_override_cents: null,
             notes: appointment.notes,
             status: 'scheduled',
           }))

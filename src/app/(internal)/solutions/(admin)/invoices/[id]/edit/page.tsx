@@ -3,6 +3,9 @@ import { ArrowLeft } from 'lucide-react'
 import { notFound } from 'next/navigation'
 
 import { InvoiceForm, type AppointmentOption } from '@/components/admin/invoice-form'
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { durationMinutes } from '@/lib/pricing/money'
+import { type ClientJobRule, pickEffectiveRule, resolveAppointmentPrice } from '@/lib/pricing/resolve'
 import { createClient } from '@/lib/supabase/server'
 
 type EditInvoicePageProps = {
@@ -16,20 +19,36 @@ type AppointmentRow = {
   scheduled_start_time: string
   scheduled_end_time: string
   price_override_cents: number | null
-  jobs: { id: string; name: string; base_price_cents: number } | null
+  jobs: { id: string; name: string; hourly_rate_cents: number }
   client_locations: { label: string; address: string } | null
   clients: { id: string; name: string } | null
 }
 
-function toAppointmentOption(row: AppointmentRow): AppointmentOption {
+type LineAmount = {
+  amount_cents: number
+  rate_cents: number | null
+  minutes: number | null
+}
+
+const appointmentSelect = `
+  id, client_id, scheduled_date, scheduled_start_time, scheduled_end_time,
+  price_override_cents,
+  jobs!inner ( id, name, hourly_rate_cents ),
+  client_locations ( label, address ),
+  clients!inner ( id, name )
+`
+
+function toAppointmentOption(row: AppointmentRow, amount: LineAmount): AppointmentOption {
   return {
     id: row.id,
     client_id: row.client_id,
     client_name: row.clients?.name ?? 'Unknown client',
     scheduled_date: row.scheduled_date,
     scheduled_start_time: row.scheduled_start_time,
-    job_name: row.jobs?.name ?? 'Unknown job',
-    job_base_price_cents: row.jobs?.base_price_cents ?? 0,
+    job_name: row.jobs.name,
+    resolved_amount_cents: amount.amount_cents,
+    resolved_rate_cents: amount.rate_cents,
+    resolved_minutes: amount.minutes,
     price_override_cents: row.price_override_cents,
     location_label: row.client_locations?.label ?? null,
     location_address: row.client_locations?.address ?? null,
@@ -58,19 +77,14 @@ export default async function EditInvoicePage({ params }: EditInvoicePageProps) 
       .eq('is_active', true)
       .eq('is_archived', false)
       .order('name', { ascending: true }),
-    supabase.from('invoice_appointments').select('appointment_id').eq('invoice_id', id),
+    supabase
+      .from('invoice_appointments')
+      .select('appointment_id, billed_amount_cents, billed_rate_cents, billed_minutes')
+      .eq('invoice_id', id),
     supabase.from('invoice_appointments').select('invoice_id, appointment_id'),
     supabase
       .from('appointments')
-      .select(
-        `
-          id, client_id, scheduled_date, scheduled_start_time, scheduled_end_time,
-          price_override_cents,
-          jobs!inner ( id, name, base_price_cents ),
-          client_locations ( label, address ),
-          clients!inner ( id, name )
-        `
-      )
+      .select(appointmentSelect)
       .eq('is_archived', false)
       .order('scheduled_date', { ascending: false }),
   ])
@@ -79,52 +93,77 @@ export default async function EditInvoicePage({ params }: EditInvoicePageProps) 
     notFound()
   }
 
-  const loadError =
-    clientsError ??
-    linkedRowsError ??
-    allLinkedRowsError ??
-    availableRowsError
+  let loadErrorMessage =
+    (clientsError ?? linkedRowsError ?? allLinkedRowsError ?? availableRowsError)?.message ?? null
 
-  if (loadError) {
-    throw new Error(loadError.message)
-  }
-
-  const linkedAppointmentIds = (linkedRows ?? []).map((row) => row.appointment_id)
+  const billedLines = linkedRows ?? []
+  const linkedAppointmentIds = billedLines.map((row) => row.appointment_id)
 
   let linkedAppointments: AppointmentRow[] = []
-  if (linkedAppointmentIds.length > 0) {
+  if (!loadErrorMessage && linkedAppointmentIds.length > 0) {
     const { data: linkedAppointmentsData, error: linkedAppointmentsError } = await supabase
       .from('appointments')
-      .select(
-        `
-          id, client_id, scheduled_date, scheduled_start_time, scheduled_end_time,
-          price_override_cents,
-          jobs!inner ( id, name, base_price_cents ),
-          client_locations ( label, address ),
-          clients!inner ( id, name )
-        `
-      )
+      .select(appointmentSelect)
       .in('id', linkedAppointmentIds)
 
     if (linkedAppointmentsError) {
-      throw new Error(linkedAppointmentsError.message)
+      loadErrorMessage = linkedAppointmentsError.message
     }
 
     linkedAppointments = (linkedAppointmentsData ?? []) as unknown as AppointmentRow[]
   }
 
-  const currentLinkedIds = new Set((linkedRows ?? []).map((row) => row.appointment_id))
+  const currentLinkedIds = new Set(linkedAppointmentIds)
   const linkedToOtherInvoices = new Set(
     (allLinkedRows ?? [])
       .filter((row) => row.invoice_id !== id)
       .map((row) => row.appointment_id)
   )
 
-  const preselectedAppointments = linkedAppointments.map(toAppointmentOption)
+  const selectableRows = ((availableRows ?? []) as unknown as AppointmentRow[]).filter(
+    (row) => !linkedToOtherInvoices.has(row.id) || currentLinkedIds.has(row.id)
+  )
 
-  const availableAppointments = ((availableRows ?? []) as unknown as AppointmentRow[])
-    .filter((row) => !linkedToOtherInvoices.has(row.id) || currentLinkedIds.has(row.id))
-    .map(toAppointmentOption)
+  let rulesByPair = new Map<string, ClientJobRule[]>()
+  if (!loadErrorMessage) {
+    try {
+      rulesByPair = await fetchClientJobRules(
+        supabase,
+        selectableRows.map((row) => ({ clientId: row.client_id, jobId: row.jobs.id }))
+      )
+    } catch {
+      loadErrorMessage = 'Failed to load client pricing rules.'
+    }
+  }
+
+  const availableAppointments = selectableRows.map((row) =>
+    toAppointmentOption(
+      row,
+      resolveAppointmentPrice({
+        job: row.jobs,
+        rule: pickEffectiveRule(rulesByPair.get(`${row.client_id}:${row.jobs.id}`) ?? [], row.scheduled_date),
+        minutes: durationMinutes(row.scheduled_start_time, row.scheduled_end_time),
+        appointmentOverrideCents: row.price_override_cents,
+      })
+    )
+  )
+
+  const frozenByAppointmentId = new Map(billedLines.map((line) => [line.appointment_id, line]))
+  const preselectedAppointments: AppointmentOption[] = []
+
+  for (const row of linkedAppointments) {
+    const frozen = frozenByAppointmentId.get(row.id)
+
+    if (frozen) {
+      preselectedAppointments.push(
+        toAppointmentOption(row, {
+          amount_cents: frozen.billed_amount_cents,
+          rate_cents: frozen.billed_rate_cents,
+          minutes: frozen.billed_minutes,
+        })
+      )
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -144,18 +183,24 @@ export default async function EditInvoicePage({ params }: EditInvoicePageProps) 
         </div>
       </section>
 
-      <InvoiceForm
-        clients={(clients ?? []).map((client) => ({ id: client.id, name: client.name }))}
-        availableAppointments={availableAppointments}
-        preselectedAppointments={preselectedAppointments}
-        invoice={{
-          id: invoice.id,
-          client_id: invoice.client_id,
-          due_date: invoice.due_date,
-          notes: invoice.notes,
-          status: invoice.status,
-        }}
-      />
+      {loadErrorMessage ? (
+        <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadErrorMessage}
+        </section>
+      ) : (
+        <InvoiceForm
+          clients={(clients ?? []).map((client) => ({ id: client.id, name: client.name }))}
+          availableAppointments={availableAppointments}
+          preselectedAppointments={preselectedAppointments}
+          invoice={{
+            id: invoice.id,
+            client_id: invoice.client_id,
+            due_date: invoice.due_date,
+            notes: invoice.notes,
+            status: invoice.status,
+          }}
+        />
+      )}
     </div>
   )
 }

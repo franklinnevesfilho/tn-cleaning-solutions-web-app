@@ -7,23 +7,15 @@ import { BriefcaseBusiness, Pencil, RotateCcw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { archiveJob, restoreJob } from '@/lib/actions/jobs'
+import { formatRate } from '@/lib/pricing/money'
 
 export type JobRow = {
 	id: string
 	name: string
 	description: string | null
-	base_price_cents: number
+	hourly_rate_cents: number
 	estimated_duration_minutes: number | null
 	is_archived: boolean
-}
-
-const usdFormatter = new Intl.NumberFormat('en-US', {
-	style: 'currency',
-	currency: 'USD',
-})
-
-function formatPrice(cents: number) {
-	return usdFormatter.format(cents / 100)
 }
 
 function formatDuration(totalMinutes: number | null) {
@@ -81,7 +73,7 @@ function JobCard({ job, archived }: { job: JobRow; archived?: boolean }) {
 						<p className="mt-1 text-xs text-neutral-500">{formatDuration(job.estimated_duration_minutes)}</p>
 					</div>
 					<span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-						{formatPrice(job.base_price_cents)}
+						{formatRate(job.hourly_rate_cents)}
 					</span>
 				</div>
 			</CardHeader>

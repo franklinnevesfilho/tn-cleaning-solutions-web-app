@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 import { InvoiceForm, type AppointmentOption } from '@/components/admin/invoice-form'
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { durationMinutes } from '@/lib/pricing/money'
+import { type ClientJobRule, pickEffectiveRule, resolveAppointmentPrice } from '@/lib/pricing/resolve'
 import { createClient } from '@/lib/supabase/server'
 
 type NewInvoicePageProps = {
@@ -15,7 +18,7 @@ type AppointmentRow = {
   scheduled_start_time: string
   scheduled_end_time: string
   price_override_cents: number | null
-  jobs: { id: string; name: string; base_price_cents: number } | null
+  jobs: { id: string; name: string; hourly_rate_cents: number }
   client_locations: { label: string; address: string } | null
   clients: { id: string; name: string } | null
 }
@@ -24,15 +27,24 @@ function normalizeParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function toAppointmentOption(row: AppointmentRow): AppointmentOption {
+function toAppointmentOption(row: AppointmentRow, rules: ClientJobRule[]): AppointmentOption {
+  const resolved = resolveAppointmentPrice({
+    job: row.jobs,
+    rule: pickEffectiveRule(rules, row.scheduled_date),
+    minutes: durationMinutes(row.scheduled_start_time, row.scheduled_end_time),
+    appointmentOverrideCents: row.price_override_cents,
+  })
+
   return {
     id: row.id,
     client_id: row.client_id,
     client_name: row.clients?.name ?? 'Unknown client',
     scheduled_date: row.scheduled_date,
     scheduled_start_time: row.scheduled_start_time,
-    job_name: row.jobs?.name ?? 'Unknown job',
-    job_base_price_cents: row.jobs?.base_price_cents ?? 0,
+    job_name: row.jobs.name,
+    resolved_amount_cents: resolved.amount_cents,
+    resolved_rate_cents: resolved.rate_cents,
+    resolved_minutes: resolved.minutes,
     price_override_cents: row.price_override_cents,
     location_label: row.client_locations?.label ?? null,
     location_address: row.client_locations?.address ?? null,
@@ -62,7 +74,7 @@ export default async function NewInvoicePage({ searchParams }: NewInvoicePagePro
         `
           id, client_id, scheduled_date, scheduled_start_time, scheduled_end_time,
           price_override_cents,
-          jobs!inner ( id, name, base_price_cents ),
+          jobs!inner ( id, name, hourly_rate_cents ),
           client_locations ( label, address ),
           clients!inner ( id, name )
         `
@@ -71,12 +83,28 @@ export default async function NewInvoicePage({ searchParams }: NewInvoicePagePro
       .order('scheduled_date', { ascending: false }),
   ])
 
-  const loadError = clientsError ?? linkedError ?? appointmentsError
+  let loadErrorMessage = (clientsError ?? linkedError ?? appointmentsError)?.message ?? null
 
   const alreadyInvoiced = new Set((linkedRows ?? []).map((row) => row.appointment_id))
-  const availableAppointments = ((appointmentRows ?? []) as unknown as AppointmentRow[])
-    .filter((row) => !alreadyInvoiced.has(row.id))
-    .map(toAppointmentOption)
+  const candidateRows = ((appointmentRows ?? []) as unknown as AppointmentRow[]).filter(
+    (row) => !alreadyInvoiced.has(row.id)
+  )
+
+  let rulesByPair = new Map<string, ClientJobRule[]>()
+  if (!loadErrorMessage) {
+    try {
+      rulesByPair = await fetchClientJobRules(
+        supabase,
+        candidateRows.map((row) => ({ clientId: row.client_id, jobId: row.jobs.id }))
+      )
+    } catch {
+      loadErrorMessage = 'Failed to load client pricing rules.'
+    }
+  }
+
+  const availableAppointments = candidateRows.map((row) =>
+    toAppointmentOption(row, rulesByPair.get(`${row.client_id}:${row.jobs.id}`) ?? [])
+  )
 
   const orderedClients = [...(clients ?? [])]
   if (selectedClientId) {
@@ -109,9 +137,9 @@ export default async function NewInvoicePage({ searchParams }: NewInvoicePagePro
         </div>
       </section>
 
-      {loadError ? (
+      {loadErrorMessage ? (
         <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {loadError.message}
+          {loadErrorMessage}
         </section>
       ) : (
         <InvoiceForm

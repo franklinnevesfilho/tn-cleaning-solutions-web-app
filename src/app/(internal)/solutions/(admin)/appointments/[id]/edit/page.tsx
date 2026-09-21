@@ -5,6 +5,8 @@ import type { PostgrestError } from '@supabase/supabase-js'
 
 import { AppointmentForm } from '@/components/admin/appointment-form'
 import { AppointmentScheduleContext } from '@/components/admin/new-appointment-schedule-context'
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { pickEffectiveRule, type ClientJobRule } from '@/lib/pricing/resolve'
 import { createClient } from '@/lib/supabase/server'
 
 type EditAppointmentPageProps = {
@@ -64,7 +66,7 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
       .order('name', { ascending: true }),
     supabase
       .from('jobs')
-      .select('id, name, base_price_cents')
+      .select('id, name, hourly_rate_cents')
       .eq('is_archived', false)
       .order('name', { ascending: true }),
     supabase
@@ -95,6 +97,35 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
   }
 
   const loadError = clientsError ?? jobsError ?? employeesError ?? recurrenceSeriesError
+
+  const jobRows = jobs ?? []
+
+  let rulesByPair = new Map<string, ClientJobRule[]>()
+  let rulesErrorMessage: string | null = null
+
+  try {
+    rulesByPair = await fetchClientJobRules(
+      supabase,
+      jobRows.map((job) => ({ clientId: typedAppointment.client_id, jobId: job.id }))
+    )
+  } catch (thrown) {
+    console.error('Error fetching client job pricing:', thrown)
+    rulesErrorMessage =
+      thrown instanceof Error ? thrown.message : 'Client pricing rules could not be loaded.'
+  }
+
+  const loadErrorMessage = loadError?.message ?? rulesErrorMessage
+
+  const formJobs = jobRows.map((job) => ({
+    id: job.id,
+    name: job.name,
+    hourly_rate_cents: job.hourly_rate_cents,
+    client_rate_cents:
+      pickEffectiveRule(
+        rulesByPair.get(`${typedAppointment.client_id}:${job.id}`) ?? [],
+        typedAppointment.scheduled_date
+      )?.hourly_rate_cents ?? null,
+  }))
 
   const appointmentFormAppointment = {
     id: typedAppointment.id,
@@ -140,9 +171,9 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
           showNewAppointmentLink
         />
 
-        {loadError ? (
+        {loadErrorMessage ? (
           <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {loadError.message}
+            {loadErrorMessage}
           </section>
         ) : typedAppointment.status === 'completed' ? (
           <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -161,7 +192,7 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
                   address: location.address,
                 })),
             }))}
-            jobs={jobs ?? []}
+            jobs={formJobs}
             employees={employees ?? []}
             appointment={appointmentFormAppointment}
             recurrenceSeries={recurrenceSeries ?? null}

@@ -15,10 +15,12 @@ type JobFormProps = {
     id: string
     name: string
     description: string | null
-    base_price_cents: number
+    hourly_rate_cents: number
     estimated_duration_minutes: number | null
   }
 }
+
+const helperText = 'text-xs text-neutral-500'
 
 const initialState: JobActionResult = {
   success: false,
@@ -93,33 +95,36 @@ export function JobForm({ job }: JobFormProps) {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="base_price_cents" className="text-sm font-medium text-neutral-700">
-              Price ($)
+            <Label htmlFor="hourly_rate_cents" className="text-sm font-medium text-neutral-700">
+              Hourly Rate ($/hour)
             </Label>
             <Input
-              id="base_price_cents"
-              name="base_price_cents"
+              id="hourly_rate_cents"
+              name="hourly_rate_cents"
               type="number"
               step="0.01"
               min="0"
               required
               defaultValue={
-                job ? (job.base_price_cents / 100).toFixed(2) : ''
+                job ? (job.hourly_rate_cents / 100).toFixed(2) : ''
               }
               aria-invalid={
-                'fieldErrors' in state && Boolean(state.fieldErrors?.base_price_cents)
+                'fieldErrors' in state && Boolean(state.fieldErrors?.hourly_rate_cents)
               }
               aria-describedby={
-                'fieldErrors' in state && state.fieldErrors?.base_price_cents
-                  ? 'price-error'
-                  : undefined
+                'fieldErrors' in state && state.fieldErrors?.hourly_rate_cents
+                  ? 'rate-help rate-error'
+                  : 'rate-help'
               }
               className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
-              placeholder="150.00"
+              placeholder="45.00"
             />
-            {'fieldErrors' in state && state.fieldErrors?.base_price_cents ? (
-              <p id="price-error" className="text-xs text-red-600">
-                {state.fieldErrors.base_price_cents}
+            <p id="rate-help" className={helperText}>
+              Charged per scheduled hour. A 2h 30m visit at $45.00/h bills $112.50.
+            </p>
+            {'fieldErrors' in state && state.fieldErrors?.hourly_rate_cents ? (
+              <p id="rate-error" className="text-xs text-red-600">
+                {state.fieldErrors.hourly_rate_cents}
               </p>
             ) : null}
           </div>
@@ -144,12 +149,15 @@ export function JobForm({ job }: JobFormProps) {
               }
               aria-describedby={
                 'fieldErrors' in state && state.fieldErrors?.estimated_duration_minutes
-                  ? 'duration-error'
-                  : undefined
+                  ? 'duration-help duration-error'
+                  : 'duration-help'
               }
               className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
               placeholder="120"
             />
+            <p id="duration-help" className={helperText}>
+              Estimate used for scheduling only. It does not affect the price.
+            </p>
             {'fieldErrors' in state && state.fieldErrors?.estimated_duration_minutes ? (
               <p id="duration-error" className="text-xs text-red-600">
                 {state.fieldErrors.estimated_duration_minutes}

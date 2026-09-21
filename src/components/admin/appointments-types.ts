@@ -6,6 +6,8 @@ export type AppointmentSummary = {
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   notes: string | null
   price_override_cents: number | null
+  price_display_cents: number
+  price_is_billed: boolean
   client: {
     id: string
     name: string
@@ -13,7 +15,6 @@ export type AppointmentSummary = {
   job: {
     id: string
     name: string
-    base_price_cents: number
   }
   location: {
     label: string

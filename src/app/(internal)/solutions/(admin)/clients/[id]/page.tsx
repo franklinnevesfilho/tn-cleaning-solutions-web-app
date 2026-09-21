@@ -155,12 +155,19 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
 						</div>
 					</div>
 
-					<Link href={`/solutions/clients/${client.id}/edit`}>
-						<Button className="h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700">
-							<Pencil className="size-4" aria-hidden="true" />
-							Edit Client
-						</Button>
-					</Link>
+					<div className="flex flex-wrap gap-2">
+						<Link href={`/solutions/clients/${client.id}/pricing`}>
+							<Button className="h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700">
+								Custom Pricing
+							</Button>
+						</Link>
+						<Link href={`/solutions/clients/${client.id}/edit`}>
+							<Button className="h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700">
+								<Pencil className="size-4" aria-hidden="true" />
+								Edit Client
+							</Button>
+						</Link>
+					</div>
 				</div>
 			</section>
 

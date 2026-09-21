@@ -2,6 +2,9 @@ import { endOfMonth, format, startOfMonth } from 'date-fns'
 
 import { AppointmentsViewToggle } from '@/components/admin/appointments-view-toggle'
 import type { AppointmentSummary } from '@/components/admin/appointments-types'
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { durationMinutes } from '@/lib/pricing/money'
+import { pickEffectiveRule, resolveAppointmentPrice, type ClientJobRule } from '@/lib/pricing/resolve'
 import { createClient } from '@/lib/supabase/server'
 
 type AppointmentsPageProps = {
@@ -10,14 +13,17 @@ type AppointmentsPageProps = {
 
 type RawAppointmentRow = {
   id: string
+  client_id: string
+  job_id: string
   scheduled_date: string
   scheduled_start_time: string
   scheduled_end_time: string
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   notes: string | null
   price_override_cents: number | null
+  billed_price_cents: number | null
   clients: { id: string; name: string } | null
-  jobs: { id: string; name: string; base_price_cents: number } | null
+  jobs: { id: string; name: string; hourly_rate_cents: number } | null
   client_locations: { label: string; address: string } | null
   appointment_employees:
     | Array<{
@@ -67,10 +73,10 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
     .from('appointments')
     .select(
       `
-        id, scheduled_date, scheduled_start_time, scheduled_end_time,
-        status, notes, price_override_cents,
+        id, client_id, job_id, scheduled_date, scheduled_start_time, scheduled_end_time,
+        status, notes, price_override_cents, billed_price_cents,
         clients!inner ( id, name ),
-        jobs!inner ( id, name, base_price_cents ),
+        jobs!inner ( id, name, hourly_rate_cents ),
         client_locations ( label, address ),
         appointment_employees ( id, employee_id, employees!inner ( full_name ) )
       `
@@ -81,30 +87,62 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
     .order('scheduled_date')
     .order('scheduled_start_time')
 
-  const appointments: AppointmentSummary[] = (data as RawAppointmentRow[] | null)?.map((row) => ({
-    id: row.id,
-    scheduled_date: row.scheduled_date,
-    scheduled_start_time: row.scheduled_start_time,
-    scheduled_end_time: row.scheduled_end_time,
-    status: row.status,
-    notes: row.notes,
-    price_override_cents: row.price_override_cents,
-    client: {
-      id: row.clients?.id ?? '',
-      name: row.clients?.name ?? 'Unknown client',
-    },
-    job: {
-      id: row.jobs?.id ?? '',
-      name: row.jobs?.name ?? 'Unknown job',
-      base_price_cents: row.jobs?.base_price_cents ?? 0,
-    },
-    location: row.client_locations,
-    assignedEmployees: (row.appointment_employees ?? []).map((assignment) => ({
-      id: assignment.id,
-      employee_id: assignment.employee_id,
-      full_name: assignment.employees?.full_name ?? 'Unknown employee',
-    })),
-  })) ?? []
+  const rows = (data as RawAppointmentRow[] | null) ?? []
+
+  let rulesByPair = new Map<string, ClientJobRule[]>()
+  let rulesErrorMessage: string | null = null
+
+  try {
+    rulesByPair = await fetchClientJobRules(
+      supabase,
+      rows.map((row) => ({ clientId: row.client_id, jobId: row.job_id }))
+    )
+  } catch (thrown) {
+    console.error('Error fetching client job pricing:', thrown)
+    rulesErrorMessage =
+      thrown instanceof Error ? thrown.message : 'Client pricing rules could not be loaded.'
+  }
+
+  const loadErrorMessage = error?.message ?? rulesErrorMessage
+  const renderableRows = loadErrorMessage ? [] : rows
+
+  const appointments: AppointmentSummary[] = renderableRows.map((row) => {
+    const resolved = resolveAppointmentPrice({
+      job: { hourly_rate_cents: row.jobs?.hourly_rate_cents ?? 0 },
+      rule: pickEffectiveRule(
+        rulesByPair.get(`${row.client_id}:${row.job_id}`) ?? [],
+        row.scheduled_date
+      ),
+      minutes: durationMinutes(row.scheduled_start_time, row.scheduled_end_time),
+      appointmentOverrideCents: row.price_override_cents,
+    })
+
+    return {
+      id: row.id,
+      scheduled_date: row.scheduled_date,
+      scheduled_start_time: row.scheduled_start_time,
+      scheduled_end_time: row.scheduled_end_time,
+      status: row.status,
+      notes: row.notes,
+      price_override_cents: row.price_override_cents,
+      price_display_cents: row.billed_price_cents ?? resolved.amount_cents,
+      price_is_billed: row.billed_price_cents !== null,
+      client: {
+        id: row.clients?.id ?? '',
+        name: row.clients?.name ?? 'Unknown client',
+      },
+      job: {
+        id: row.jobs?.id ?? '',
+        name: row.jobs?.name ?? 'Unknown job',
+      },
+      location: row.client_locations,
+      assignedEmployees: (row.appointment_employees ?? []).map((assignment) => ({
+        id: assignment.id,
+        employee_id: assignment.employee_id,
+        full_name: assignment.employees?.full_name ?? 'Unknown employee',
+      })),
+    }
+  })
 
   return (
     <div className="space-y-6">
@@ -115,9 +153,9 @@ export default async function AppointmentsPage({ searchParams }: AppointmentsPag
         </div>
       </section>
 
-      {error ? (
+      {loadErrorMessage ? (
         <section className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error.message}
+          {loadErrorMessage}
         </section>
       ) : null}
 

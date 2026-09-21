@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { SearchableMultiSelect } from '@/components/ui/searchable-multi-select'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { createInvoice, type InvoiceActionResult, updateInvoice } from '@/lib/actions/invoices'
+import { formatCents, formatRate } from '@/lib/pricing/money'
 
 export type AppointmentOption = {
   id: string
@@ -19,7 +20,9 @@ export type AppointmentOption = {
   scheduled_date: string
   scheduled_start_time: string
   job_name: string
-  job_base_price_cents: number
+  resolved_amount_cents: number
+  resolved_rate_cents: number | null
+  resolved_minutes: number | null
   price_override_cents: number | null
   location_label: string | null
   location_address: string | null
@@ -57,12 +60,25 @@ function SubmitButton({ isEditMode }: { isEditMode: boolean }) {
   )
 }
 
-function currencyFromCents(value: number) {
-  return `$${(value / 100).toFixed(2)}`
+function initialPriceForAppointment(appointment: AppointmentOption) {
+  return appointment.resolved_amount_cents / 100
 }
 
-function initialPriceForAppointment(appointment: AppointmentOption) {
-  return (appointment.price_override_cents ?? appointment.job_base_price_cents) / 100
+function priceHint({
+  resolved_amount_cents,
+  resolved_rate_cents,
+  resolved_minutes,
+}: AppointmentOption) {
+  let hint: string
+
+  if (resolved_rate_cents === null || resolved_minutes === null) {
+    hint = formatCents(resolved_amount_cents)
+  } else {
+    const hours = Math.floor(resolved_minutes / 60)
+    hint = `${formatRate(resolved_rate_cents)} × ${hours}h ${resolved_minutes % 60}m = ${formatCents(resolved_amount_cents)}`
+  }
+
+  return hint
 }
 
 function dateLabel(isoDate: string) {
@@ -292,9 +308,7 @@ export function InvoiceForm({
                           }
                           className="h-10 rounded-xl border-neutral-200 bg-white px-3 text-sm text-neutral-900 shadow-sm"
                         />
-                        <p className="text-[11px] text-neutral-500">
-                          Base: {currencyFromCents(appointment.job_base_price_cents)}
-                        </p>
+                        <p className="text-[11px] text-neutral-500">{priceHint(appointment)}</p>
                       </div>
                     </div>
                   ))}
@@ -317,7 +331,7 @@ export function InvoiceForm({
 
         <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Running Total</p>
-          <p className="mt-1 text-2xl font-bold text-neutral-950">{currencyFromCents(runningTotalCents)}</p>
+          <p className="mt-1 text-2xl font-bold text-neutral-950">{formatCents(runningTotalCents)}</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

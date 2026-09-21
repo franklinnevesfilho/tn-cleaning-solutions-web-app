@@ -15,6 +15,7 @@ import {
   type AppointmentActionResult,
   updateAppointment,
 } from '@/lib/actions/appointments'
+import { formatRate } from '@/lib/pricing/money'
 
 type AppointmentFormProps = {
   clients: Array<{
@@ -22,7 +23,12 @@ type AppointmentFormProps = {
     name: string
     client_locations: Array<{ id: string; label: string; address: string }>
   }>
-  jobs: Array<{ id: string; name: string; base_price_cents: number }>
+  jobs: Array<{
+    id: string
+    name: string
+    hourly_rate_cents: number
+    client_rate_cents: number | null
+  }>
   employees: Array<{ id: string; full_name: string }>
   defaultDate?: string
   appointment?: {
@@ -107,6 +113,28 @@ export function AppointmentForm({
     () => jobs.find((job) => job.id === selectedJobId),
     [jobs, selectedJobId]
   )
+
+  const resolvedRateClientId = appointment?.client_id ?? null
+  const clientRateIsStale = resolvedRateClientId !== null && selectedClientId !== resolvedRateClientId
+
+  const rateHint = useMemo(() => {
+    let hint: string | null = null
+
+    if (selectedJob) {
+      const clientRate = selectedJob.client_rate_cents
+      const standard = `Rate: ${formatRate(selectedJob.hourly_rate_cents)}`
+
+      if (clientRateIsStale) {
+        hint = `${standard} · this client's negotiated rate, if any, applies on save`
+      } else if (clientRate !== null && clientRate !== selectedJob.hourly_rate_cents) {
+        hint = `${standard} · this client: ${formatRate(clientRate)}`
+      } else {
+        hint = standard
+      }
+    }
+
+    return hint
+  }, [selectedJob, clientRateIsStale])
 
   const handleClientChange = (nextClientId: string) => {
     setSelectedClientId(nextClientId)
@@ -193,9 +221,7 @@ export function AppointmentForm({
               </option>
             ))}
           </select>
-          <p className="text-xs text-neutral-500">
-            Default price: ${((selectedJob?.base_price_cents ?? 0) / 100).toFixed(2)}
-          </p>
+          {rateHint ? <p className="text-xs text-neutral-500">{rateHint}</p> : null}
           {'fieldErrors' in state && state.fieldErrors?.job_id ? (
             <p className="text-xs text-red-600">{state.fieldErrors.job_id}</p>
           ) : null}
@@ -257,7 +283,7 @@ export function AppointmentForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="price_override" className="text-sm font-medium text-neutral-700">
-              Price Override ($)
+              Manual price override ($)
             </Label>
             <Input
               id="price_override"
@@ -271,7 +297,7 @@ export function AppointmentForm({
                   : ''
               }
               className="h-11 rounded-xl border-neutral-200 bg-white px-3.5 text-sm text-neutral-950 shadow-sm"
-              placeholder="Leave blank to use job default"
+              placeholder="Leave blank to bill this client's hourly rate for the scheduled time"
             />
             {'fieldErrors' in state && state.fieldErrors?.price_override ? (
               <p className="text-xs text-red-600">{state.fieldErrors.price_override}</p>

@@ -13,7 +13,7 @@ type ContextAppointmentRow = {
   scheduled_end_time: string
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   clients: { id: string; name: string } | null
-  jobs: { id: string; name: string; base_price_cents: number } | null
+  jobs: { id: string; name: string } | null
   client_locations: { label: string | null; address: string | null } | null
   appointment_employees:
     | Array<{
@@ -26,7 +26,7 @@ type ContextAppointmentRow = {
 
 type ContextAppointmentQueryRow = Omit<ContextAppointmentRow, 'clients' | 'jobs' | 'client_locations'> & {
   clients: Array<{ id: string; name: string }> | { id: string; name: string } | null
-  jobs: Array<{ id: string; name: string; base_price_cents: number }> | { id: string; name: string; base_price_cents: number } | null
+  jobs: Array<{ id: string; name: string }> | { id: string; name: string } | null
   client_locations: Array<{ label: string | null; address: string | null }> | { label: string | null; address: string | null } | null
   appointment_employees:
     | Array<{
@@ -100,7 +100,7 @@ export function AppointmentScheduleContext({
           `
             id, scheduled_date, scheduled_start_time, scheduled_end_time, status,
             clients!inner ( id, name ),
-            jobs!inner ( id, name, base_price_cents ),
+            jobs!inner ( id, name ),
             client_locations ( label, address ),
             appointment_employees ( id, employee_id, employees!inner ( full_name ) )
           `

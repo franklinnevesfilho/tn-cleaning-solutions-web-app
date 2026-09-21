@@ -3,6 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { durationMinutes, parseDollarsToCents } from '@/lib/pricing/money'
+import { type ClientJobRule, pickEffectiveRule, resolveAppointmentPrice } from '@/lib/pricing/resolve'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
@@ -27,11 +30,28 @@ type ParsedInvoiceInput = {
 type AppointmentPriceRow = {
   id: string
   client_id: string
+  job_id: string
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   is_archived: boolean
   price_override_cents: number | null
-  jobs: { base_price_cents: number } | null
+  scheduled_date: string
+  scheduled_start_time: string
+  scheduled_end_time: string
+  jobs: { hourly_rate_cents: number }
 }
+
+type InvoiceLine = {
+  appointment_id: string
+  billed_amount_cents: number
+  billed_rate_cents: number | null
+  billed_minutes: number | null
+}
+
+const duplicateAppointmentError =
+  'One or more selected appointments are already attached to another invoice.'
+
+const linesNotRestoredError =
+  "The invoice's previous appointments could not be restored, so it currently has no lines."
 
 async function requireAdminRole(): Promise<{ success: true } | { success: false; error: string }> {
   const supabase = await createClient()
@@ -63,19 +83,6 @@ function uniqueIds(values: FormDataEntryValue[]) {
   return Array.from(new Set(values.map((value) => String(value)).filter(Boolean)))
 }
 
-function parseMoneyToCents(raw: string) {
-  if (!raw) {
-    return null
-  }
-
-  const parsed = Number(raw)
-  if (Number.isNaN(parsed) || !Number.isFinite(parsed) || parsed < 0) {
-    return null
-  }
-
-  return Math.round(parsed * 100)
-}
-
 function parseInvoiceFormData(formData: FormData):
   | { success: true; data: ParsedInvoiceInput }
   | { success: false; error: string; fieldErrors: InvoiceFieldErrors } {
@@ -101,7 +108,7 @@ function parseInvoiceFormData(formData: FormData):
   const selections: Array<{ appointmentId: string; priceCents: number }> = []
   for (const appointmentId of appointmentIds) {
     const rawPrice = String(formData.get(`price_override_${appointmentId}`) ?? '').trim()
-    const priceCents = parseMoneyToCents(rawPrice)
+    const priceCents = parseDollarsToCents(rawPrice)
 
     if (priceCents == null) {
       fieldErrors.prices = 'Each selected appointment must have a valid non-negative price.'
@@ -136,7 +143,13 @@ async function fetchAppointmentsForPricing(appointmentIds: string[]): Promise<
   const adminClient = createAdminClient()
   const { data, error } = await adminClient
     .from('appointments')
-    .select('id, client_id, status, is_archived, price_override_cents, jobs!inner(base_price_cents)')
+    .select(
+      `
+        id, client_id, job_id, status, is_archived, price_override_cents,
+        scheduled_date, scheduled_start_time, scheduled_end_time,
+        jobs!inner(hourly_rate_cents)
+      `
+    )
     .in('id', appointmentIds)
 
   if (error) {
@@ -151,18 +164,18 @@ async function fetchAppointmentsForPricing(appointmentIds: string[]): Promise<
   return { success: true, rows }
 }
 
-async function applyAppointmentPricesAndGetTotal(
+async function buildInvoiceLines(
   parsed: ParsedInvoiceInput
-): Promise<{ success: true; totalCents: number } | { success: false; error: string }> {
+): Promise<
+  { success: true; lines: InvoiceLine[]; totalCents: number } | { success: false; error: string }
+> {
   const pricingResult = await fetchAppointmentsForPricing(parsed.selections.map((item) => item.appointmentId))
   if (!pricingResult.success) {
     return pricingResult
   }
 
   const byId = new Map(pricingResult.rows.map((row) => [row.id, row]))
-  const adminClient = createAdminClient()
-
-  let totalCents = 0
+  const selected: Array<{ priceCents: number; appointment: AppointmentPriceRow }> = []
 
   for (const selection of parsed.selections) {
     const appointment = byId.get(selection.appointmentId)
@@ -179,24 +192,98 @@ async function applyAppointmentPricesAndGetTotal(
       return { success: false, error: 'Archived appointments cannot be invoiced.' }
     }
 
-    const basePriceCents = appointment.jobs?.base_price_cents ?? 0
-    const desiredOverride = selection.priceCents === basePriceCents ? null : selection.priceCents
-
-    if (appointment.price_override_cents !== desiredOverride) {
-      const { error } = await adminClient
-        .from('appointments')
-        .update({ price_override_cents: desiredOverride })
-        .eq('id', appointment.id)
-
-      if (error) {
-        return { success: false, error: error.message }
-      }
-    }
-
-    totalCents += selection.priceCents
+    selected.push({ priceCents: selection.priceCents, appointment })
   }
 
-  return { success: true, totalCents }
+  let rulesByPair: Map<string, ClientJobRule[]>
+  try {
+    rulesByPair = await fetchClientJobRules(
+      createAdminClient(),
+      selected.map(({ appointment }) => ({
+        clientId: appointment.client_id,
+        jobId: appointment.job_id,
+      }))
+    )
+  } catch {
+    return { success: false, error: 'Failed to load client pricing rules.' }
+  }
+
+  const lines: InvoiceLine[] = []
+  let totalCents = 0
+
+  for (const { priceCents, appointment } of selected) {
+    const rules = rulesByPair.get(`${appointment.client_id}:${appointment.job_id}`) ?? []
+    const resolved = resolveAppointmentPrice({
+      job: appointment.jobs,
+      rule: pickEffectiveRule(rules, appointment.scheduled_date),
+      minutes: durationMinutes(appointment.scheduled_start_time, appointment.scheduled_end_time),
+      appointmentOverrideCents: appointment.price_override_cents,
+    })
+    const matchesResolved = priceCents === resolved.amount_cents
+
+    lines.push({
+      appointment_id: appointment.id,
+      billed_amount_cents: priceCents,
+      billed_rate_cents: matchesResolved ? resolved.rate_cents : null,
+      billed_minutes: matchesResolved ? resolved.minutes : null,
+    })
+
+    totalCents += priceCents
+  }
+
+  return { success: true, lines, totalCents }
+}
+
+function toJunctionRows(invoiceId: string, lines: InvoiceLine[]) {
+  return lines.map((line) => ({
+    invoice_id: invoiceId,
+    appointment_id: line.appointment_id,
+    billed_amount_cents: line.billed_amount_cents,
+    billed_rate_cents: line.billed_rate_cents,
+    billed_minutes: line.billed_minutes,
+  }))
+}
+
+async function writeBilledPriceCache(lines: InvoiceLine[]): Promise<void> {
+  const adminClient = createAdminClient()
+
+  for (const line of lines) {
+    const { error } = await adminClient
+      .from('appointments')
+      .update({ billed_price_cents: line.billed_amount_cents })
+      .eq('id', line.appointment_id)
+
+    if (error) {
+      console.error('billed_price_cents write failed', line.appointment_id, error.message)
+    }
+  }
+}
+
+async function clearBilledPriceCache(appointmentIds: string[]): Promise<void> {
+  if (appointmentIds.length > 0) {
+    const { error } = await createAdminClient()
+      .from('appointments')
+      .update({ billed_price_cents: null })
+      .in('id', appointmentIds)
+
+    if (error) {
+      console.error('billed_price_cents clear failed', appointmentIds.join(','), error.message)
+    }
+  }
+}
+
+async function restoreInvoiceLines(invoiceId: string, lines: InvoiceLine[]) {
+  let restored = true
+
+  if (lines.length > 0) {
+    const { error } = await createAdminClient()
+      .from('invoice_appointments')
+      .insert(toJunctionRows(invoiceId, lines))
+
+    restored = !error
+  }
+
+  return restored
 }
 
 function isUniqueConstraintError(error: string) {
@@ -206,6 +293,7 @@ function isUniqueConstraintError(error: string) {
 
 function revalidateInvoicePaths(invoiceId?: string) {
   revalidatePath('/solutions/invoices')
+  revalidatePath('/solutions/appointments')
   if (invoiceId) {
     revalidatePath(`/solutions/invoices/${invoiceId}`)
   }
@@ -236,9 +324,9 @@ export async function createInvoice(
     return parsed
   }
 
-  const totalResult = await applyAppointmentPricesAndGetTotal(parsed.data)
-  if (!totalResult.success) {
-    return { success: false, error: totalResult.error }
+  const linesResult = await buildInvoiceLines(parsed.data)
+  if (!linesResult.success) {
+    return { success: false, error: linesResult.error }
   }
 
   let redirectPath = ''
@@ -253,7 +341,7 @@ export async function createInvoice(
         due_date: parsed.data.dueDate,
         notes: parsed.data.notes,
         status: 'draft',
-        total_cents: totalResult.totalCents,
+        total_cents: linesResult.totalCents,
       })
       .select('id')
       .single()
@@ -264,23 +352,19 @@ export async function createInvoice(
 
     const invoiceId = createdInvoice.id
 
-    const { error: linkError } = await adminClient.from('invoice_appointments').insert(
-      parsed.data.selections.map((selection) => ({
-        invoice_id: invoiceId,
-        appointment_id: selection.appointmentId,
-      }))
-    )
+    const { error: linkError } = await adminClient
+      .from('invoice_appointments')
+      .insert(toJunctionRows(invoiceId, linesResult.lines))
 
     if (linkError) {
       if (isUniqueConstraintError(linkError.message)) {
-        return {
-          success: false,
-          error: 'One or more selected appointments are already attached to another invoice.',
-        }
+        return { success: false, error: duplicateAppointmentError }
       }
 
       return { success: false, error: linkError.message }
     }
+
+    await writeBilledPriceCache(linesResult.lines)
 
     redirectPath = `/solutions/invoices/${invoiceId}`
   } catch {
@@ -346,35 +430,27 @@ export async function updateInvoice(
 
   const { data: linkedRows, error: linkedError } = await adminClient
     .from('invoice_appointments')
-    .select('appointment_id')
+    .select('appointment_id, billed_amount_cents, billed_rate_cents, billed_minutes')
     .eq('invoice_id', id)
 
   if (linkedError) {
     return { success: false, error: linkedError.message }
   }
 
-  const totalResult = await applyAppointmentPricesAndGetTotal(parsed.data)
-  if (!totalResult.success) {
-    return { success: false, error: totalResult.error }
+  const linesResult = await buildInvoiceLines(parsed.data)
+  if (!linesResult.success) {
+    return { success: false, error: linesResult.error }
   }
+
+  const previousLines = (linkedRows ?? []) as InvoiceLine[]
+  const selectedIds = new Set(linesResult.lines.map((line) => line.appointment_id))
+  const removedAppointmentIds = previousLines
+    .map((line) => line.appointment_id)
+    .filter((appointmentId) => !selectedIds.has(appointmentId))
 
   let redirectPath = ''
 
   try {
-    const { error: updateInvoiceError } = await adminClient
-      .from('invoices')
-      .update({
-        client_id: parsed.data.clientId,
-        due_date: parsed.data.dueDate,
-        notes: parsed.data.notes,
-        total_cents: totalResult.totalCents,
-      })
-      .eq('id', id)
-
-    if (updateInvoiceError) {
-      return { success: false, error: updateInvoiceError.message }
-    }
-
     const { error: deleteLinksError } = await adminClient
       .from('invoice_appointments')
       .delete()
@@ -384,22 +460,34 @@ export async function updateInvoice(
       return { success: false, error: deleteLinksError.message }
     }
 
-    const { error: insertLinksError } = await adminClient.from('invoice_appointments').insert(
-      parsed.data.selections.map((selection) => ({
-        invoice_id: id,
-        appointment_id: selection.appointmentId,
-      }))
-    )
+    const { error: insertLinksError } = await adminClient
+      .from('invoice_appointments')
+      .insert(toJunctionRows(id, linesResult.lines))
 
     if (insertLinksError) {
-      if (isUniqueConstraintError(insertLinksError.message)) {
-        return {
-          success: false,
-          error: 'One or more selected appointments are already attached to another invoice.',
-        }
-      }
+      const restored = await restoreInvoiceLines(id, previousLines)
+      const detail = isUniqueConstraintError(insertLinksError.message)
+        ? duplicateAppointmentError
+        : insertLinksError.message
 
-      return { success: false, error: insertLinksError.message }
+      return { success: false, error: restored ? detail : `${detail} ${linesNotRestoredError}` }
+    }
+
+    await clearBilledPriceCache(removedAppointmentIds)
+    await writeBilledPriceCache(linesResult.lines)
+
+    const { error: updateInvoiceError } = await adminClient
+      .from('invoices')
+      .update({
+        client_id: parsed.data.clientId,
+        due_date: parsed.data.dueDate,
+        notes: parsed.data.notes,
+        total_cents: linesResult.totalCents,
+      })
+      .eq('id', id)
+
+    if (updateInvoiceError) {
+      return { success: false, error: updateInvoiceError.message }
     }
 
     redirectPath = `/solutions/invoices/${id}`

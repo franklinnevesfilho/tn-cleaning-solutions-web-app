@@ -54,7 +54,7 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
         .order('name', { ascending: true }),
       supabase
         .from('jobs')
-        .select('id, name, base_price_cents')
+        .select('id, name, hourly_rate_cents')
         .eq('is_archived', false)
         .order('name', { ascending: true }),
       supabase
@@ -106,7 +106,15 @@ export default async function NewAppointmentPage({ searchParams }: NewAppointmen
                     address: location.address,
                   })),
               }))}
-              jobs={jobs ?? []}
+              // The client is picked in the browser, so no client rule can be resolved at render
+              // time. A browser-side lookup is impossible by design: client_job_pricing is
+              // admin-only and RLS would return an empty set silently (REQ-008).
+              jobs={(jobs ?? []).map((job) => ({
+                id: job.id,
+                name: job.name,
+                hourly_rate_cents: job.hourly_rate_cents,
+                client_rate_cents: null,
+              }))}
               employees={employees ?? []}
               defaultDate={isDateValue(defaultDate) ? defaultDate : undefined}
             />
