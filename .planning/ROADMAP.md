@@ -58,7 +58,13 @@ cleared and the tree builds again.
 - Plans:
   - `phases/02-pricing-consumption/02-01-PLAN.md` — jobs surface. 2 tasks, concurrent.
   - `phases/02-pricing-consumption/02-02-PLAN.md` — appointments + invoices. 2 tasks, concurrent.
-  - The two plans share no writable file and run at the same time.
+  - `phases/02-pricing-consumption/02-03-PLAN.md` — **AMD-1 remediation, added 2026-09-21.
+    COMPLETE.** The user ratified OQ-R1 as option (a), and both tasks landed: T1 removed the
+    unratified `voidInvoice` cache clear from `src/lib/actions/invoices.ts` (formerly `:632-641`),
+    T2 undid the matching narrowing in `supabase/checks/pricing_backfill_check.sql`. That file now
+    diffs clean against its committed version, confirming the revert is exact. Both were applied
+    by the orchestrator after the delegated agent was cut off by a rate limit.
+  - The three plans share no writable file and can run at the same time.
 - Gate: `npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm test` — **all four clean, no
   exceptions**. This is where the constitution's §16 bar is restored. Plus each plan's smoke script.
   **Those four prove almost nothing about this milestone's actual risk** (REQ-017): the clients are
@@ -67,12 +73,18 @@ cleared and the tree builds again.
   zero `/rest/v1/` responses ≥ 400**.
 - **Blocked on**: Phase 1 only.
 
-## Phase 3 — Client-job pricing admin surface  ·  status: NOT STARTED  ·  depends on Phase 1
+## Phase 3 — Client-job pricing admin surface  ·  status: CODE COMPLETE (statically verified only; CRUD smoke script not run)  ·  depends on Phase 1
 
 CRUD for `client_job_pricing` hung off the client detail page, mirroring client-locations CRUD.
 
-- Requirements: REQ-015.
-- Plan: `phases/03-client-job-pricing-admin/03-01-PLAN.md` — 3 tasks.
+- Requirements: REQ-015, **REQ-023** (added 2026-09-21).
+- Plan: `phases/03-client-job-pricing-admin/03-01-PLAN.md` — 3 tasks. **All landed**; see
+  `03-SUMMARY.md`.
+- **`03-02` — archived-rate uniqueness fix, added 2026-09-21, user-approved for this milestone.**
+  One task: a migration replacing `client_job_pricing_client_id_job_id_effective_from_key` with a
+  partial unique index `WHERE is_archived = false`, plus a check that the action's 23505 → date
+  field-error mapping still fires. Owned files: the new migration and
+  `src/lib/actions/client-job-pricing.ts`. Closes REQ-023.
 - **Does not depend on Phase 2.** Dispatch it in the same block.
 - Gate: `npm run lint`, plus the CRUD smoke script. **Corrected 2026-09-18:** `npx tsc --noEmit` is
   clean throughout this milestone (REQ-017), so Phase 3's files must contribute no error *and* the
@@ -213,6 +225,11 @@ BLOCK 2
           src/app/(internal)/solutions/(admin)/invoices/new/page.tsx
           src/app/(internal)/solutions/(admin)/invoices/[id]/page.tsx
           src/app/(internal)/solutions/(admin)/invoices/[id]/edit/page.tsx
+02-03-T1  src/lib/actions/invoices.ts          <- same file as 02-02-T2; 02-02-T2 has shipped, so
+                                                 no live overlap, but never dispatch them together
+02-03-T2  supabase/checks/pricing_backfill_check.sql
+                                              <- held by a concurrent agent as of 2026-09-21;
+                                                 wait for its release before dispatching
 03-01-T1  src/lib/actions/client-job-pricing.ts
 03-01-T2  src/components/admin/client-job-pricing-form.tsx
           src/components/admin/client-job-pricing-list.tsx

@@ -9,6 +9,7 @@ import {
 	markInvoicePaid,
 	voidInvoice,
 } from '@/lib/actions/invoices'
+import { formatCents, formatRate } from '@/lib/pricing/money'
 import { createClient } from '@/lib/supabase/server'
 
 type InvoiceDetailPageProps = {
@@ -34,17 +35,18 @@ type InvoiceDetailRow = {
 	invoice_appointments:
 		| Array<{
 				appointment_id: string
+				billed_amount_cents: number
+				billed_rate_cents: number | null
+				billed_minutes: number | null
 				appointments: {
 					id: string
 					scheduled_date: string
 					scheduled_start_time: string
 					scheduled_end_time: string
-					price_override_cents: number | null
 					notes: string | null
 					jobs: {
 						id: string
 						name: string
-						base_price_cents: number
 					} | null
 					client_locations: {
 						label: string
@@ -57,13 +59,6 @@ type InvoiceDetailRow = {
 
 function invoiceRef(id: string) {
 	return `INV-${id.slice(0, 8).toUpperCase()}`
-}
-
-function formatCurrency(cents: number) {
-	return new Intl.NumberFormat('en-US', {
-		style: 'currency',
-		currency: 'USD',
-	}).format(cents / 100)
 }
 
 function formatDateValue(value: string | null) {
@@ -120,12 +115,16 @@ function statusBadgeClasses(status: ReturnType<typeof effectiveStatus>) {
 	return 'border border-neutral-200 bg-neutral-100 text-neutral-700'
 }
 
-function appointmentPriceCents(appointment: NonNullable<InvoiceDetailRow['invoice_appointments']>[number]['appointments']) {
-	if (!appointment) {
-		return 0
+function rateBreakdown(rateCents: number | null, minutes: number | null) {
+	let breakdown: string | null
+
+	if (rateCents === null || minutes === null) {
+		breakdown = null
+	} else {
+		breakdown = `${formatRate(rateCents)} × ${Math.floor(minutes / 60)}h ${minutes % 60}m`
 	}
 
-	return appointment.price_override_cents ?? appointment.jobs?.base_price_cents ?? 0
+	return breakdown
 }
 
 export default async function InvoiceDetailPage({ params }: InvoiceDetailPageProps) {
@@ -139,11 +138,10 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 				id, status, issued_date, due_date, total_cents, notes, is_archived, created_at, client_id,
 				clients!inner ( id, name, email, phone ),
 				invoice_appointments (
-					appointment_id,
+					appointment_id, billed_amount_cents, billed_rate_cents, billed_minutes,
 					appointments!inner (
-						id, scheduled_date, scheduled_start_time, scheduled_end_time,
-						price_override_cents, notes,
-						jobs!inner ( id, name, base_price_cents ),
+						id, scheduled_date, scheduled_start_time, scheduled_end_time, notes,
+						jobs!inner ( id, name ),
 						client_locations ( label, address )
 					)
 				)
@@ -161,9 +159,17 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 	const status = effectiveStatus(invoice)
 	const overdue = status === 'overdue'
 
-	const appointments = (invoice.invoice_appointments ?? [])
-		.map((row) => row.appointments)
-		.filter((appointment): appointment is NonNullable<typeof appointment> => Boolean(appointment))
+	const lines = (invoice.invoice_appointments ?? []).flatMap((row) =>
+		row.appointments === null
+			? []
+			: [
+					{
+						appointment: row.appointments,
+						billed_amount_cents: row.billed_amount_cents,
+						breakdown: rateBreakdown(row.billed_rate_cents, row.billed_minutes),
+					},
+				]
+	)
 
 	const canEdit = invoice.status === 'draft'
 	const canIssue = invoice.status === 'draft'
@@ -312,7 +318,7 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 							</div>
 						) : null}
 
-						{appointments.length > 0 ? (
+						{lines.length > 0 ? (
 							<div className="mt-4 overflow-x-auto">
 								<table className="min-w-full border-collapse text-left text-sm">
 									<thead>
@@ -325,20 +331,23 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 										</tr>
 									</thead>
 									<tbody>
-										{appointments.map((appointment) => (
-											<tr key={appointment.id} className="border-b border-neutral-100 text-neutral-700">
-												<td className="px-2 py-2">{formatDateValue(appointment.scheduled_date)}</td>
+										{lines.map((line) => (
+											<tr key={line.appointment.id} className="border-b border-neutral-100 text-neutral-700">
+												<td className="px-2 py-2">{formatDateValue(line.appointment.scheduled_date)}</td>
 												<td className="px-2 py-2">
-													{appointment.scheduled_start_time.slice(0, 5)} - {appointment.scheduled_end_time.slice(0, 5)}
+													{line.appointment.scheduled_start_time.slice(0, 5)} - {line.appointment.scheduled_end_time.slice(0, 5)}
 												</td>
-												<td className="px-2 py-2">{appointment.jobs?.name ?? 'Unknown job'}</td>
+												<td className="px-2 py-2">{line.appointment.jobs?.name ?? 'Unknown job'}</td>
 												<td className="px-2 py-2">
-													{[appointment.client_locations?.label, appointment.client_locations?.address]
+													{[line.appointment.client_locations?.label, line.appointment.client_locations?.address]
 														.filter(Boolean)
 														.join(' - ') || 'No location'}
 												</td>
 												<td className="px-2 py-2 text-right font-medium text-neutral-900">
-													{formatCurrency(appointmentPriceCents(appointment))}
+													{formatCents(line.billed_amount_cents)}
+													{line.breakdown ? (
+														<span className="block text-xs font-normal text-neutral-500">{line.breakdown}</span>
+													) : null}
 												</td>
 											</tr>
 										))}
@@ -349,7 +358,7 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 												Total
 											</td>
 											<td className="px-2 py-3 text-right text-sm font-bold text-neutral-950">
-												{formatCurrency(invoice.total_cents)}
+												{formatCents(invoice.total_cents)}
 											</td>
 										</tr>
 									</tfoot>
@@ -373,9 +382,9 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 							</li>
 							<li className="flex items-center gap-2">
 								<CircleOff className="size-4 text-neutral-500" aria-hidden="true" />
-								{appointments.length} appointment{appointments.length === 1 ? '' : 's'}
+								{lines.length} appointment{lines.length === 1 ? '' : 's'}
 							</li>
-							<li className="text-neutral-900">Total: {formatCurrency(invoice.total_cents)}</li>
+							<li className="text-neutral-900">Total: {formatCents(invoice.total_cents)}</li>
 						</ul>
 					</article>
 				</div>

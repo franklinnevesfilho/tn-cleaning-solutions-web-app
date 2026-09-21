@@ -6,7 +6,16 @@ import { notFound } from 'next/navigation'
 import { AdminClockOverride } from '@/components/admin/admin-clock-override'
 import { Button } from '@/components/ui/button'
 import { cancelAppointment, uncancelAppointment } from '@/lib/actions/appointments'
+import { fetchClientJobRules } from '@/lib/pricing/lookup'
+import { durationMinutes, formatCents, formatRate } from '@/lib/pricing/money'
+import {
+  pickEffectiveRule,
+  resolveAppointmentPrice,
+  type PriceSource,
+  type ResolvedPrice,
+} from '@/lib/pricing/resolve'
 import { createClient } from '@/lib/supabase/server'
+import { cn } from '@/lib/utils'
 
 type AppointmentDetailPageProps = {
   params: Promise<{ id: string }>
@@ -14,12 +23,15 @@ type AppointmentDetailPageProps = {
 
 type AppointmentDetailRow = {
   id: string
+  client_id: string
+  job_id: string
   scheduled_date: string
   scheduled_start_time: string
   scheduled_end_time: string
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   notes: string
   price_override_cents: number | null
+  billed_price_cents: number | null
   is_archived: boolean
   clients: {
     id: string
@@ -30,7 +42,7 @@ type AppointmentDetailRow = {
   jobs: {
     id: string
     name: string
-    base_price_cents: number
+    hourly_rate_cents: number
     estimated_duration_minutes: number | null
     description: string | null
   } | null
@@ -60,6 +72,13 @@ type AppointmentDetailRow = {
         } | null
       }>
     | null
+}
+
+type PriceView = {
+  amount: string
+  breakdown: string | null
+  label: string
+  isUnavailable: boolean
 }
 
 function statusBadgeClasses(status: AppointmentDetailRow['status']) {
@@ -101,10 +120,10 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
     .from('appointments')
     .select(
       `
-        id, scheduled_date, scheduled_start_time, scheduled_end_time,
-        status, notes, price_override_cents, is_archived,
+        id, client_id, job_id, scheduled_date, scheduled_start_time, scheduled_end_time,
+        status, notes, price_override_cents, billed_price_cents, is_archived,
         clients!inner ( id, name, phone, email ),
-        jobs!inner ( id, name, base_price_cents, estimated_duration_minutes, description ),
+        jobs!inner ( id, name, hourly_rate_cents, estimated_duration_minutes, description ),
         client_locations ( id, label, address ),
         recurrence_series ( id, frequency, start_date, end_date, max_occurrences, is_active ),
         appointment_employees (
@@ -122,7 +141,18 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
     notFound()
   }
 
-  const effectivePriceCents = appointment.price_override_cents ?? appointment.jobs?.base_price_cents ?? 0
+  let priceView: PriceView
+
+  if (appointment.billed_price_cents === null) {
+    priceView = await resolvedPriceView(supabase, appointment)
+  } else {
+    priceView = {
+      amount: formatCents(appointment.billed_price_cents),
+      breakdown: null,
+      label: 'Invoiced',
+      isUnavailable: false,
+    }
+  }
 
   async function handleCancelAppointment() {
     'use server'
@@ -220,7 +250,20 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
 
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Price</p>
-                <p className="mt-1 text-sm font-semibold text-neutral-900">${(effectivePriceCents / 100).toFixed(2)}</p>
+                <p
+                  className={cn(
+                    'mt-1 text-sm font-semibold',
+                    priceView.isUnavailable ? 'text-red-700' : 'text-neutral-900'
+                  )}
+                >
+                  {priceView.amount}
+                </p>
+                {priceView.breakdown ? (
+                  <p className="text-sm text-neutral-600">{priceView.breakdown}</p>
+                ) : null}
+                <p className={cn('text-xs', priceView.isUnavailable ? 'text-red-700' : 'text-neutral-500')}>
+                  {priceView.label}
+                </p>
               </div>
 
               <div>
@@ -353,4 +396,69 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
       </section>
     </div>
   )
+}
+
+async function resolvedPriceView(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  appointment: AppointmentDetailRow
+): Promise<PriceView> {
+  let view: PriceView
+
+  try {
+    const rulesByPair = await fetchClientJobRules(supabase, [
+      { clientId: appointment.client_id, jobId: appointment.job_id },
+    ])
+    const resolved = resolveAppointmentPrice({
+      job: { hourly_rate_cents: appointment.jobs?.hourly_rate_cents ?? 0 },
+      rule: pickEffectiveRule(
+        rulesByPair.get(`${appointment.client_id}:${appointment.job_id}`) ?? [],
+        appointment.scheduled_date
+      ),
+      minutes: durationMinutes(appointment.scheduled_start_time, appointment.scheduled_end_time),
+      appointmentOverrideCents: appointment.price_override_cents,
+    })
+
+    view = {
+      amount: formatCents(resolved.amount_cents),
+      breakdown: rateBreakdown(resolved),
+      label: priceSourceLabel(resolved.source),
+      isUnavailable: false,
+    }
+  } catch (thrown) {
+    console.error('Error fetching client job pricing:', thrown)
+    view = {
+      amount: 'Unavailable',
+      breakdown: null,
+      label: 'This client’s negotiated rates could not be loaded, so no price is shown.',
+      isUnavailable: true,
+    }
+  }
+
+  return view
+}
+
+function rateBreakdown(resolved: ResolvedPrice) {
+  let breakdown: string | null = null
+
+  if (resolved.rate_cents !== null && resolved.minutes !== null) {
+    const hours = Math.floor(resolved.minutes / 60)
+    const minutes = resolved.minutes % 60
+    breakdown = `${formatRate(resolved.rate_cents)} × ${hours}h ${minutes}m`
+  }
+
+  return breakdown
+}
+
+function priceSourceLabel(source: PriceSource) {
+  let label: string
+
+  if (source === 'appointment_override') {
+    label = 'Manual override'
+  } else if (source === 'client_job_pricing') {
+    label = 'Client rate'
+  } else {
+    label = 'Standard rate'
+  }
+
+  return label
 }

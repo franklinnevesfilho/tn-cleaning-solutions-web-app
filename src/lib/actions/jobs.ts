@@ -3,12 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { parseDollarsToCents } from '@/lib/pricing/money'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
 type JobFieldErrors = {
   name?: string
-  base_price_cents?: string
+  hourly_rate_cents?: string
   estimated_duration_minutes?: string
 }
 
@@ -19,7 +20,7 @@ export type JobActionResult =
 type ParsedJobInput = {
   name: string
   description: string | null
-  base_price_cents: number
+  hourly_rate_cents: number
   estimated_duration_minutes: number | null
 }
 
@@ -50,7 +51,7 @@ function parseJobFormData(formData: FormData):
   | { success: false; error: string; fieldErrors: JobFieldErrors } {
   const name = String(formData.get('name') ?? '').trim()
   const descriptionRaw = String(formData.get('description') ?? '').trim()
-  const priceRaw = String(formData.get('base_price_cents') ?? '').trim()
+  const hourlyRateRaw = String(formData.get('hourly_rate_cents') ?? '')
   const durationRaw = String(formData.get('estimated_duration_minutes') ?? '').trim()
 
   const fieldErrors: JobFieldErrors = {}
@@ -59,11 +60,9 @@ function parseJobFormData(formData: FormData):
     fieldErrors.name = 'Name is required.'
   }
 
-  const parsedPrice = Number(priceRaw)
-  if (!priceRaw || Number.isNaN(parsedPrice) || !Number.isFinite(parsedPrice)) {
-    fieldErrors.base_price_cents = 'Enter a valid price in dollars.'
-  } else if (parsedPrice < 0) {
-    fieldErrors.base_price_cents = 'Price cannot be negative.'
+  const hourlyRateCents = parseDollarsToCents(hourlyRateRaw)
+  if (hourlyRateCents === null) {
+    fieldErrors.hourly_rate_cents = 'Enter a valid hourly rate in dollars.'
   }
 
   let estimatedDurationMinutes: number | null = null
@@ -82,7 +81,7 @@ function parseJobFormData(formData: FormData):
     }
   }
 
-  if (Object.keys(fieldErrors).length > 0) {
+  if (hourlyRateCents === null || Object.keys(fieldErrors).length > 0) {
     return {
       success: false,
       error: 'Please correct the highlighted fields.',
@@ -90,14 +89,12 @@ function parseJobFormData(formData: FormData):
     }
   }
 
-  const basePriceCents = Math.round(parsedPrice * 100)
-
   return {
     success: true,
     data: {
       name,
       description: descriptionRaw || null,
-      base_price_cents: basePriceCents,
+      hourly_rate_cents: hourlyRateCents,
       estimated_duration_minutes: estimatedDurationMinutes,
     },
   }
@@ -216,23 +213,7 @@ export async function archiveJob(id: string): Promise<JobActionResult> {
     return { success: false, error: 'Job id is required.' }
   }
 
-  const authResult = await requireAdminRole()
-  if (!authResult.success) {
-    return { success: false, error: authResult.error }
-  }
-
-  const adminClient = createAdminClient()
-  const { error } = await adminClient
-    .from('jobs')
-    .update({ is_archived: true })
-    .eq('id', id)
-
-  if (error) {
-    return { success: false, error: error.message }
-  }
-
-  revalidatePath('/solutions/jobs')
-  return { success: true }
+  return setJobsArchived([id], true)
 }
 
 export async function restoreJob(id: string): Promise<JobActionResult> {
@@ -240,6 +221,26 @@ export async function restoreJob(id: string): Promise<JobActionResult> {
     return { success: false, error: 'Job id is required.' }
   }
 
+  return setJobsArchived([id], false)
+}
+
+export async function archiveJobs(ids: string[]): Promise<JobActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: 'Select at least one job to archive.' }
+  }
+
+  return setJobsArchived(ids, true)
+}
+
+export async function restoreJobs(ids: string[]): Promise<JobActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: 'Select at least one job to restore.' }
+  }
+
+  return setJobsArchived(ids, false)
+}
+
+async function setJobsArchived(ids: string[], isArchived: boolean): Promise<JobActionResult> {
   const authResult = await requireAdminRole()
   if (!authResult.success) {
     return { success: false, error: authResult.error }
@@ -248,8 +249,8 @@ export async function restoreJob(id: string): Promise<JobActionResult> {
   const adminClient = createAdminClient()
   const { error } = await adminClient
     .from('jobs')
-    .update({ is_archived: false })
-    .eq('id', id)
+    .update({ is_archived: isArchived })
+    .in('id', ids)
 
   if (error) {
     return { success: false, error: error.message }

@@ -7,14 +7,45 @@ Baseline: `improved-appointments` @ `7ae55f5`.
 
 <!-- Owned by the orchestrator. Planner does not write below this line until the next section. -->
 
-- **Current phase**: **Phase 1 — COMPLETE and verified 2026-09-18.** Next phase: Block 2
-  (Phase 2 + Phase 3), not started.
-- **Phase status**: all five Phase 1 tasks landed and independently verified against a live local
-  stack by the orchestrator — not accepted on any agent's word, and not on any exit code.
-  `01-01-T1`, `01-01-T2`, `01-02-T1`, `01-03-T1`, `01-03-T2` all complete.
-- **Last verified commit**: `7ae55f5`. **Nothing is committed and nothing may be.** Working tree
-  carries all milestone work as uncommitted changes, by design. `git diff --cached` is empty.
-- **Tasks complete**:
+- **Out-of-milestone UI work, 2026-09-21 — jobs list/card interaction refactor.** Tier 1, not part
+  of Phases 1–3 and carrying no REQ ID. Replaced the per-card Edit pill and per-card Archive button
+  with card-click-to-edit plus a per-section "Select" mode and bulk archive/restore.
+  `src/components/admin/jobs-list.tsx` rewritten; `archiveJobs`/`restoreJobs` added to
+  `src/lib/actions/jobs.ts` (single `.in('id', ids)` round trip). `verifier`: PASS against 10
+  acceptance criteria. `/code-review high`: no findings in either changed file. **Uncommitted**
+  (working tree at `b0096cb`), and **not exercised in a browser** — the select-mode checkbox
+  double-toggle fix is verified by source reading only. Next action: user runs a manual browser
+  pass of `/solutions/jobs` on desktop and a small viewport.
+- **Current phase**: **Phases 1, 2 and 3 all implemented as of 2026-09-21, including `03-02`
+  (REQ-023).** Remaining before the milestone can be called done: the **REQ-021 browser walk** and
+  Phase 3's CRUD smoke, which the **user is running manually** — no agent will run them; plus the
+  **unverified DOWN SQL** on the newest migration (see below).
+- **User decisions, 2026-09-21** — all three of the orchestrator's open questions are answered:
+  1. **Browser QA**: the user runs the manual test plan themselves. Do not start `qa-visual` or a
+     local Supabase for it.
+  2. **REQ-023, the archived-rate uniqueness bug**: **fix now, in this milestone.** Done — see
+     `03-02` below.
+  3. **REQ-022, void permanently consuming appointments**: **DEFER.** Filed by the user as its own
+     GitHub issue; recorded here as PROPOSED / unscheduled / out-of-milestone. No agent creates it.
+- **Phase status**:
+  - **Phase 1 — COMPLETE, verified 2026-09-18** against a live local stack (evidence below).
+  - **Phase 2 — code complete, statically verified only.** `02-01-T1`, `02-01-T2`, `02-02-T1`,
+    `02-02-T2` landed; `02-03-T1` (the OQ-R1 revert) landed.
+  - **Phase 3 — code complete, statically verified only.** `03-01-T1`, `03-01-T2`, `03-01-T3`
+    landed, plus `02-03-T2` (the matching check-script revert) and **`03-02` (REQ-023)**.
+- **Reconciliation, 2026-09-21 — this section was materially stale and has been corrected.** It
+  previously read "Phase 1 … Block 2 not started" and "**Nothing is committed and nothing may be**".
+  Both were false against the repo. Phase 1's work **is** committed, as `c0fac5e`
+  ("feat(pricing): add hourly job pricing and client-specific pricing foundation"), with its
+  planning docs in `24886c2`; the branch has since merged main-side work and HEAD is now `4a3e058`.
+  Constitution §6 still binds **this** session — nothing here was committed — but the file's claim
+  that the tree carries all milestone work uncommitted no longer describes reality, and anyone
+  resuming on it would have re-done Phase 1.
+- **Last verified commit**: `4a3e058` (HEAD). Phase 1 is *in* that history. Phase 2/3 work is
+  uncommitted in the working tree. `git diff --cached` is empty.
+- **The plan's PASS criteria name `7ae55f5`** as the expected HEAD. That is stale for the same
+  reason; do not read the mismatch as a regression.
+- **Phase 1 tasks complete**:
   - `01-01-T1` — migration A, `src/types/database.ts`, `supabase/checks/pricing_backfill_check.sql`.
   - `01-01-T2` — `scripts/seed-admin-users.ts` (host guard + fail-loud + read-back),
     `supabase/test-data.sql` (hourly rates, `Hourly Deep Clean`, one `client_job_pricing` row).
@@ -23,6 +54,72 @@ Baseline: `improved-appointments` @ `7ae55f5`.
     `get_employee_location_ids()`, `client_locations` policy repaired.
   - `01-03-T2` — the three `(employee)/` route files re-pointed at the views. Exactly six changed
     lines, all PostgREST aliases; nothing else in those files moved.
+
+### Phase 2 / Phase 3 status and evidence (2026-09-21, orchestrator)
+
+Seven tasks were dispatched as one parallel block, then a static review, then three fix tracks,
+then the OQ-R1 revert. **No feature testing was run in that session — the user asked for manual
+test instructions instead**, so every claim below is static.
+
+- **Static gate, run first-hand on the combined tree after the revert**: REQ-004 grep
+  (`base_price_cents|pricing_mode` over `src/`) returns **zero hits** — the rename sweep is
+  complete; `npx tsc --noEmit` **clean**; `npm test` **17/17**; `npm run build` compiles (its only
+  failure is the sandbox blocking a Google Fonts fetch in `layout.tsx`, not a code defect);
+  `npm run lint` has **6 errors, all pre-existing** in files this milestone did not touch
+  (`use-mobile.ts`, `carousel.tsx`, `invite-employee-form.tsx`, `work-sessions-list.tsx`) plus two
+  `react-hooks/set-state-in-effect` in `invoice-form.tsx` that were present at HEAD.
+- **`npm run lint` is therefore NOT clean, so constitution §16 is not yet met.** Those 6 errors are
+  inherited, not introduced, and clearing them is out of this milestone's scope — but §16 is
+  written as an absolute, so someone must either fix them or amend §16.
+- **A pre-existing build blocker was fixed**: `src/lib/utils.ts:5` imported `@/types/duration-result`,
+  which had never existed in the repo (it arrived broken with `91da3cc` off main). Every real
+  consumer declares its own local `DurationResult`, so `utils.ts`'s `calculateDuration` was dead
+  code with a broken import. `src/types/duration-result.ts` was added to restore the build. This is
+  **outside the milestone's owned-file map** and was done by the orchestrator.
+- **Ownership-map correction**: `02-02-T1` also edited `src/components/admin/appointments-list.tsx`,
+  which no task in `ROADMAP.md` owns. `02-02-PLAN.md`'s T1 body mandates it (DET-13's per-row
+  amount) but its "Files owned" block was never updated. No concurrent task wrote that file, so
+  there was no conflict. **The map should be amended.**
+### `03-02` — REQ-023, archived-rate uniqueness (2026-09-21, user-approved mid-milestone)
+
+- **New migration**: `supabase/migrations/20260921120000_client_job_pricing_partial_unique.sql`.
+  Creates `client_job_pricing_live_client_id_job_id_effective_from_idx` — UNIQUE on
+  `(client_id, job_id, effective_from) WHERE is_archived = false` — then drops
+  `client_job_pricing_client_id_job_id_effective_from_key`. CREATE before DROP, so a failure rolls
+  back with the old protection intact. No `CONCURRENTLY`: the Supabase CLI wraps each migration in
+  a transaction, and splitting the build from the DROP would open a window with both rules or
+  neither in force. **No backfill — no row's data changes.** It is a pure relaxation: the old
+  constraint made every triple distinct, and distinctness over a set implies it over any subset,
+  so the index cannot fail on existing data.
+- **⚠ CONSTITUTION §4 IS ONE STEP SHORT: the DOWN SQL is written but NOT verified**, because no
+  database was started this session. The header says so in those words. **Someone must execute the
+  two DOWN statements against a reset database before this deploys**, then amend the header.
+- **The DOWN has an inherent data-dependent failure mode**, documented in the migration header with
+  a detector query: re-adding the full-table constraint fails on exactly the rows this change
+  exists to permit (an archived row and a live row sharing a triple). That is inherent to the
+  relaxation, not a defect — the old schema could not hold that data.
+- **A new failure mode the index opens, found and handled**: under the old constraint, restoring an
+  archived rate could never conflict, because the slot stayed reserved throughout. Now it can —
+  archive A, create live B on the same triple, restore A → 23505, which
+  `client-job-pricing-list.tsx:116` would have rendered as a raw Postgres string. Guarded by
+  `toArchiveFailure` at `src/lib/actions/client-job-pricing.ts:260-270`, called at `:292`, on the
+  restore direction only. New user-facing message: *"An active rate for this job already starts on
+  that date. Archive or edit that rate first."*
+- `isUniqueConstraintError` (`:270-273`) needed **no change** — it matches on the message text
+  (`duplicate key` / `unique`), never on a constraint name, so a partial index still maps to the
+  date field error. `src/types/database.ts` needed **no change**: its `Relationships` array carries
+  foreign keys only; unique constraints and indexes have no representation there.
+- **Re-verification after the migration, run first-hand**: REQ-004 grep zero hits;
+  `npx tsc --noEmit` clean; `npm test` 17/17; **`npm run build` succeeded** (the earlier failure was
+  the sandbox blocking a Google Fonts fetch, not code); `npm run lint` unchanged at 6 pre-existing
+  errors. No reference to the dropped constraint name survives anywhere outside the two migrations.
+
+- **Still NOT done — the real Phase 2 gate.** Per D-22 the four static commands "prove almost
+  nothing about this milestone's actual risk": the Supabase clients are untyped, so a surviving
+  wrong column name is a runtime 400, not a build error. **REQ-021's browser walk over all ten
+  affected routes, asserting zero `/rest/v1/` responses ≥ 400, has not been run**, nor has any
+  `supabase db reset` / seed / smoke step, nor Phase 3's CRUD smoke script. The milestone cannot be
+  declared verified until it is.
 
 ### Phase 1 verification evidence (2026-09-18, orchestrator, first-hand)
 
@@ -184,6 +281,9 @@ orchestrator. They are settled; do not reopen them.
 | **D-19** | **Half falsified 2026-09-18 by D-22.** Was: "Phase 1 deliberately ships a tree where `npx tsc --noEmit` and `npm run build` **fail**, with an enumerated, bounded error set." **`tsc` does not fail — it is clean.** What survives is the *sequencing* half, on its original reasoning: Phase 1 still ships ahead of its call sites, its gate is still migration + seeds + `npm test` + `lint`, and `npm run build` still returns at the Phase 2 gate. The tree it ships is inconsistent at **runtime** (a page querying `base_price_cents` 400s), never red in `tsc` or `build`. | The premise was wrong about the mechanism, not the schedule. The rename touches ~57 call sites across eight files that four Block-2 tasks own exclusively. Folding those into Phase 1 would either collide with every Block-2 task or serialise the whole milestone behind one mechanical sweep — one extra block on the critical path for zero benefit. Phase 1's gate is therefore migration + seeds + `npm test`; the full bar returns at the Phase 2 gate. |
 | **D-22** | **The Supabase clients are untyped, so the rename has no compiler safety net. Verified 2026-09-18, after `01-01-T1` completed and was verified.** `createAdminClient()` (`src/lib/supabase/admin.ts:6`) and `createClient()` (`src/lib/supabase/server.ts:6`) both call the factory **with no `Database` generic**, so both are `SupabaseClient<any>`. Every one of the 57 `base_price_cents` sites is either a read through an untyped client into a hand-declared local row type, or a string literal inside a `.select(...)`. With the rename landed, `npx tsc --noEmit` returns **exit 0, clean**. The breakage is entirely at runtime: `GET /rest/v1/jobs?select=id,name,base_price_cents` → `400 {"code":"42703","message":"column jobs.base_price_cents does not exist"}`; the embedded form `appointments?select=id,jobs!inner(id,name,base_price_cents)` → the same for `jobs_1.base_price_cents`. | **What it costs Phase 2:** the 21-file sweep in `01-RESEARCH.md §10` must be done by grep, file by file, with no compiler enumerating the work and no build failure catching a miss — a missed site is a silent 400 on a live admin page. Phase 2's gate therefore rests on REQ-004's zero grep plus **REQ-021's browser walk over all ten affected routes**, not on `tsc`/`lint`/`build`, all three of which pass straight over the defect. REQ-017 was vacuous under the old premise (it could be neither satisfied nor falsified) and has been rewritten around this. Same root cause as the two `src/lib/pricing/lookup.ts` errors: `01-01-T1` also had to add `Relationships` and `Functions` members to `src/types/database.ts` for `Database` to satisfy postgrest-js's `GenericSchema` — without them `Schema` resolved to `never` and `from(...).select(...)` returned `never` rows, so adding `client_job_pricing` alone did **not** clear them. Typing the clients with `Database` would give the project a real safety net, but doing it inside this milestone would surface every pre-existing schema drift at once, in files four concurrent tasks own. Out of scope here; worth its own issue. |
 | **D-20** | Seeded job prices change from `15000` to `4500`. | `Standard House Cleaning` at `15000` would read as `$150.00/hour` locally, which makes every seeded appointment absurd and hides real bugs behind implausible numbers. This is local seed data only; it says nothing about production, which is reinterpreted in place per D-09. |
+| **D-23** | **AMD-1, 2026-09-21 — planner's adjudication of the `voidInvoice` drift. `voidInvoice` must NOT clear `appointments.billed_price_cents`. The spec is upheld; `src/lib/actions/invoices.ts:630-641` is the divergence and is reverted by 02-03-T1. NOT RATIFIED BY THE USER — see OQ-R1.** The original clause was a considered decision, not an oversight: `02-02-PLAN.md:255-257` states its rationale ("the appointment is still spoken for"). Its only error is the trailing "until the link is removed", which implies a release path that does not exist; that phrase is corrected in REQ-018. | The implementer's premise — a void invoice is not a bill, so the client was never charged that amount — is **correct about the money and insufficient about this system**. Three pre-existing facts make the appointment unbillable regardless of the cache: `invoice_appointments_appointment_id_key UNIQUE (appointment_id)` is global and status-blind (`20260427000000_schema_snapshot.sql:352`); both invoice builders exclude any appointment holding *any* junction row, with no status filter (`invoices/new/page.tsx:70,88-90`, `invoices/[id]/edit/page.tsx:84,117-121`); and `void` is terminal, only `draft` is editable (`invoices.ts:343-345`), with no `deleteInvoice`. So clearing the cache changes only the display: the appointment then renders as an ordinary un-invoiced visit — live price, no "Invoiced" chip (`appointments/page.tsx:128-129`, `appointments-list.tsx:125-129`, `appointments/[id]/page.tsx:146-155`) — while still never appearing in the builder, and `createInvoice` would still fail the UNIQUE with the generic duplicate error. That is a false affordance with no visible cause; the stale chip is at least an honest signal that agrees with what the system will do. No money is misstated either way: every revenue figure reads `invoices.total_cents` (`invoices/page.tsx:114,165`, `dashboard/page.tsx:84,282`) and nothing aggregates `appointments.billed_price_cents`. **The reviewer found a real defect, one layer up: voiding an invoice permanently consumes its appointments, and has done since before this milestone.** That is REQ-022, it is all-or-nothing, and it is not Phase 2 work. Half of it is worse than none. |
+| **D-24** | **AMD-1 partial endorsement, 2026-09-21.** `archiveInvoice` and `restoreInvoice` correctly leave `billed_price_cents` untouched, and keep doing so **even if REQ-022 lands**. This half of the implementer's reasoning is adopted verbatim into REQ-022(d). | Archival is an orthogonal visibility flag, not a statement about whether money was billed. An archived *paid* invoice is money the client really was charged; clearing the cache there would display a live derived price in place of an amount that was actually invoiced and collected — a straightforward misstatement, and the exact class of silent history rewrite constitution §7 exists to prevent. |
+| **D-25** | **AMD-2, 2026-09-21.** The check script's two cache invariants are a single **iff** and must always be narrowed together or not at all. Under D-23 (Branch A) both are status-blind: no join to `invoices` anywhere in the `"invariant"` CTE. `supabase/checks/pricing_backfill_check.sql:93-94` currently carries the Branch-B narrowing and is reverted by 02-03-T2. | The pair means "a cache value exists exactly when a junction row claims the appointment, and then it matches". Narrowing only *'appointment cache disagrees with its junction row'* to non-void invoices — which is what was applied in flight — makes an appointment that kept a stale cache through a void invisible to **both** checks: the first skips it on status, the second finds a junction row and passes it. That is precisely the drift the narrowing was introduced to tolerate, and it would go unreported. Under Branch A the narrowing is not merely unsafe but unnecessary, since no junction row is ever released. |
 
 ## Assumptions
 
@@ -200,6 +300,34 @@ orchestrator. They are settled; do not reopen them.
 | AS-09 | There is live data in `jobs`, `appointments`, `invoices` and `invoice_appointments` on `blhxzilsjuzbeoxtkbap`, but the planner has **never seen it**. | Under D-09 this matters more than it did: the reinterpretation's blast radius is unknown until `pricing_backfill_check.sql` is run against a copy of production. That is why REQ-002 was rewritten into a reporting requirement. |
 | AS-10 | **Widened by D-21.** PostgREST can resolve an embed into a definer view — now needed **two levels deep** (`appointment_employees_employee_view → appointments_employee_view → jobs_employee_view`), plus the `clients` / `client_locations` embeds hanging off a view rather than a base table. | `01-03-T2`'s three queries fall back to multiple round-trips with JS stitching. The task carries that fallback explicitly and per-file, so this costs rework inside one task, not a replan. It is why `01-03-T2` is `coder-sr` and why it is sequenced after `01-03-T1` — the answer is empirical and cannot be known before the views exist. |
 | AS-11 | **Confirmed, and now load-bearing.** No employee-facing screen displays any price today: all three job embeds select only `name` / `description`, and the appointment embeds select no price column. Verified at `7ae55f5` (`01-RESEARCH.md §12`). | If any employee screen *did* show a price, D-21 would need a product decision about what replaces it. None does, so the answer is KL-02: nothing replaces it. This also means the UI cannot be used as evidence that REQ-020 works — hence its acceptance is written at the PostgREST layer, not the screen. |
+
+---
+
+## Open questions — RATIFIED (no longer gating)
+
+> **OQ-R1 was ratified by the user on 2026-09-21: option (a), uphold the spec.** `voidInvoice` must
+> not clear `appointments.billed_price_cents`. `02-03-PLAN` was dispatched and both of its tasks
+> have landed, so the tree now matches the approved spec again:
+>
+> - `02-03-T1` — the cache-clearing block was removed from `voidInvoice`
+>   (`src/lib/actions/invoices.ts`, formerly `:632-641`). `clearBilledPriceCache` is retained and
+>   still has its one live caller, `updateInvoice` at `:476`. `archiveInvoice` / `restoreInvoice`
+>   were already correct and are untouched.
+> - `02-03-T2` — the Branch-B narrowing was removed from `supabase/checks/pricing_backfill_check.sql`.
+>   Both cache invariants in section 3 are status-blind again, per D-25, and the added
+>   "only voided invoices bill it" invariant was deleted. The file now diffs clean against its
+>   committed version, which confirms the revert is exact.
+>
+> Both reverts were applied by the orchestrator directly after the delegated agent was cut off
+> mid-task by a rate limit; each was a specified deletion, and the result was verified by re-reading
+> both files. **REQ-022 (voiding should genuinely release its appointments) remains PROPOSED,
+> unratified and unscheduled** — it is the real defect underneath OQ-R1 and needs a migration.
+>
+> The DETAIL table below is unchanged: those are defaults-applied-and-carry-on.
+
+| # | Question | Planner's recommendation | What rides on it |
+|---|---|---|---|
+| **OQ-R1** | **When an admin voids an invoice, should the appointments on it go back to showing their live hourly price and lose the "Invoiced" chip — knowing that they still cannot be put on a new invoice, because a voided invoice never releases its appointments?** Today: they keep the voided invoice's frozen amount and the chip, and cannot be re-invoiced. Voiding is terminal — there is no delete or un-void — so this state is permanent for that visit. **(a) Leave it as it is** — the chip stays, and the screen keeps telling the truth that the visit is spoken for and cannot be billed. **(b) Clear the amount now** — the visit looks billable again but still is not, with nothing on screen explaining why. **(c) Fix it properly** — voiding releases the visit so it can genuinely be invoiced again; costs a database migration and is a separate piece of work. | **(a) now, (c) when there is room.** Reasoning at D-23; (c) is written up as REQ-022. **(b) is what is in the tree today and is the one option the planner recommends against**, because it makes the screen and the system disagree without saying so. | **(a)** → dispatch `02-03-PLAN` (revert `invoices.ts:630-641`, revert the check's narrowing at `pricing_backfill_check.sql:93-94`). REQ-022 stays proposed and unscheduled. **(b)** → REQ-018's acceptance bullet and `02-02-PLAN`'s three clauses are rewritten to require the clear, the check keeps a Branch-B narrowing on **both** cache invariants (D-25), and the false affordance is accepted and recorded as a known limitation. **(c)** → `02-03-PLAN` is discarded, REQ-022 is promoted to a scheduled phase of its own (migration + builders + action + check), and the code in the tree is retained as its first increment. |
 
 ---
 
@@ -255,4 +383,5 @@ choice** (see D-11). Both are recorded with their reasoning and both are cheap t
 | **B-04** | No visibility into production data shape. Under D-09 this is now material: nobody knows how far each job's effective price moves. | The human cannot judge the reinterpretation's blast radius until it is measured. | Not blocking the build. `supabase/checks/pricing_backfill_check.sql` (REQ-002) exists precisely to produce that report, and it is read-only. **Run it against a restore of production before the human deploys.** That is a human step outside this plan. |
 | **B-05** | **Rewritten 2026-09-18 for D-21's widened scope.** Under the old D-14 this was one uncertain embed (`appointments → jobs_employee_view`). Under D-21 it is a **two-level view chain** — `appointment_employees_employee_view → appointments_employee_view → jobs_employee_view` — with the `clients!inner` and `client_locations` embeds now hanging off a view instead of a base table. Any link PostgREST cannot infer breaks that screen. | **`01-03-T2` only**, and only the three `(employee)/` screens. No admin screen, no other phase, and no Block-2 task touches those files. But the blast radius *within* that scope is total: between `01-03-T1` landing and `01-03-T2` passing, the employee product does not work. | Not blocking dispatch, and deliberately **not** mitigated by guessing. `01-03-T1` (migration only) goes out immediately; `01-03-T2` is sequenced after it precisely because the embed-vs-round-trips decision is empirical — it is answered by running the query against the real views and reading PostgREST's response. `01-03-T2` carries an explicit per-file fallback (fetch ids, then fetch each view by id, stitch in JS) and its PASS requires all three screens exercised **in a browser**, with the job-site address present. Evidence the embeds may work: `appointment_employees_employee_view → appointments!inner(...)` already crosses a view boundary in this stack today (`(employee)/schedule/page.tsx:435-462`). Evidence they may not: that is view→table, and this needs table→view and view→view. |
 | **B-07** | **`scripts/seed-admin-users.ts` reports success over a database it did not write to. Observed 2026-09-18.** `npm run seed:admin` printed `✅ Created test job: Standard House Cleaning` and `🎉 Test data created successfully!` and **exited 0**, while `SELECT count(*) FROM public.jobs` returned `0` and `auth.users` was empty. Mechanism: the per-user loop logs its errors and continues (`:83`, `:103`, `:118`, `:132`), `createTestData` logs and bare-`return`s (`:204`, `:235`, `:277`), the two "Skipping test data" branches (`:167`, `:178`) return silently, and `seedUsers().then(() => process.exit(0))` (`:307`) converts every one of those into a green run. Nothing reads back what it claims to have created, and nothing reports which database it resolved. | Every downstream smoke step — Phase 2's pricing walk, Phase 3's CRUD script, the employee-visibility checks in `01-03` — assumes seeded rows exist. On an empty database they all go green while proving nothing, in exactly the way the seed itself did. This is the **second** green-over-broken signal on this milestone (D-22 is the first), so it is treated as a pattern, not a coincidence. | Folded into `01-01-T2`, which already owns the file: check every insert/upsert/auth error, exit **non-zero** on any failure or skip, log the resolved database host before writing, and read back the rows it reports creating. REQ-010's acceptance and `01-01-PLAN`'s verification were rewritten so that **every seed claim is a row count queried after the run** — no exit code, no console line. Not blocking dispatch; blocking any PASS that cites `exit 0` as seed evidence. |
+| **B-08** | **RESOLVED 2026-09-21 — user ratified OQ-R1 as (a); `02-03-T1` and `02-03-T2` both landed and the tree matches the spec again. The row below is the original statement, kept for history.** ~~The tree implements the opposite of the approved spec on one point, and the user has not ruled. Opened 2026-09-21 (AMD-1).~~ `src/lib/actions/invoices.ts:630-641` clears `appointments.billed_price_cents` on void; `REQUIREMENTS.md` REQ-018 and `02-02-PLAN.md` forbid it. `supabase/checks/pricing_backfill_check.sql:93-94` has been narrowed in flight to accommodate the code. The planner adjudicated for the spec (D-23) but that is a recommendation, not ratification. | Phase 2 cannot be declared verified against REQ-018 while the code and the requirement disagree, and the check script currently asserts a weaker invariant than REQ-002 specifies (D-25) — so a stale cache after a void would go unreported either way. `02-03-PLAN`'s two tasks are written and gated. | **Relay OQ-R1 to the user.** On (a)/uphold: dispatch `02-03-T1` and, once the concurrent SQL agent releases the file, `02-03-T2`. On (b): amend REQ-018 / `02-02-PLAN` the other way and apply D-25's Branch-B wording to **both** cache invariants. On (c): promote REQ-022 to a scheduled phase and keep the shipped code as its first increment. Nothing here blocks Phase 3. |
 | **B-06** | Dropping `"Employee select assigned appointments"` (REQ-020) silently empties `"Employee select locations for assigned appointments"` (`20260427000000_schema_snapshot.sql:586-588`), whose `USING` clause subqueries `public.appointments` — a table the employee no longer passes RLS on. Employees would lose the job-site address they see today, with **no error** — just an empty embed. | Would be a silent employee-facing regression, invisible to any SQL-only check and easy to miss in a screenshot. | Folded into `01-03-T1`'s migration: a `get_employee_location_ids()` `SECURITY DEFINER` helper mirroring the existing `get_employee_appointment_ids()`, returning the identical row set. REQ-020's acceptance pins it — as the seeded employee, `GET /rest/v1/client_locations?select=*` must return the **same row set** as before the migration — and `01-03-T2`'s smoke script requires the address visible on screen. |
