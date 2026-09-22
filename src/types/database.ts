@@ -306,6 +306,7 @@ export type Database = {
           price_override_cents: number | null
           billed_price_cents: number | null
           status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
+          status_before_cancel: 'scheduled' | 'in_progress' | 'completed' | null
           notes: string
           created_at: string
           updated_at: string
@@ -323,6 +324,7 @@ export type Database = {
           price_override_cents?: number | null
           billed_price_cents?: number | null
           status?: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
+          status_before_cancel?: 'scheduled' | 'in_progress' | 'completed' | null
           notes: string
           created_at?: string
           updated_at?: string
@@ -340,6 +342,7 @@ export type Database = {
           price_override_cents?: number | null
           billed_price_cents?: number | null
           status?: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
+          status_before_cancel?: 'scheduled' | 'in_progress' | 'completed' | null
           notes?: string
           created_at?: string
           updated_at?: string

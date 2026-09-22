@@ -652,6 +652,13 @@ export async function updateAppointment(
       }
     }
 
+    if (existingAppointment.status === 'cancelled') {
+      return {
+        success: false,
+        error: 'This appointment cannot be edited because it has been cancelled. Reopen it first.',
+      }
+    }
+
     if (parsedRecurrence.data.edit_scope === 'series' || parsedRecurrence.data.edit_scope === 'future') {
       if (!parsedRecurrence.data.recurrence_series_id) {
         return { success: false, error: 'Recurrence series is required for this edit scope.' }
@@ -720,9 +727,11 @@ export async function updateAppointment(
           price_override_cents: parsed.data.price_override_cents,
           notes: parsed.data.notes,
           status: parsed.data.status,
+          status_before_cancel: parsed.data.status === 'cancelled' ? existingAppointment.status : null,
         })
         .eq('id', id)
         .eq('is_archived', false)
+        .eq('status', existingAppointment.status)
         .select(
           'id, client_id, job_id, recurrence_series_id, location_id, scheduled_date, scheduled_start_time, scheduled_end_time, price_override_cents, notes'
         )
@@ -733,20 +742,63 @@ export async function updateAppointment(
       }
 
       if (!appointment) {
-        return { success: false, error: 'Appointment not found.' }
+        const { data: latestAppointment, error: latestAppointmentError } = await adminClient
+          .from('appointments')
+          .select('id')
+          .eq('id', id)
+          .eq('is_archived', false)
+          .maybeSingle()
+
+        if (latestAppointmentError) {
+          return { success: false, error: latestAppointmentError.message }
+        }
+
+        if (!latestAppointment) {
+          return { success: false, error: 'Appointment not found.' }
+        }
+
+        return {
+          success: false,
+          error: 'The appointment changed while you were editing it. Refresh and try again.',
+        }
       }
 
-      const { error: deleteAssignmentsError } = await adminClient
+      // An assignment row whose employee survives the edit is never rewritten: clocked_in_at,
+      // clocked_out_at, admin_notes and the row id that updateClockTime and employee_clock address
+      // all live on it, and the delete-and-reinsert this replaced destroyed them on every edit.
+      const { data: existingAssignments, error: existingAssignmentsError } = await adminClient
         .from('appointment_employees')
-        .delete()
+        .select('id, employee_id')
         .eq('appointment_id', id)
 
-      if (deleteAssignmentsError) {
-        return { success: false, error: deleteAssignmentsError.message }
+      if (existingAssignmentsError) {
+        return { success: false, error: existingAssignmentsError.message }
       }
 
-      if (parsed.data.employee_ids.length > 0) {
-        const assignmentInserts: TablesInsert<'appointment_employees'>[] = parsed.data.employee_ids.map(
+      const assignmentRows = existingAssignments ?? []
+      const submittedEmployeeIds = new Set(parsed.data.employee_ids)
+      const assignedEmployeeIds = new Set(assignmentRows.map((row) => row.employee_id))
+
+      const staleAssignmentIds = assignmentRows
+        .filter((row) => !submittedEmployeeIds.has(row.employee_id))
+        .map((row) => row.id)
+      const newEmployeeIds = parsed.data.employee_ids.filter(
+        (employeeId) => !assignedEmployeeIds.has(employeeId)
+      )
+
+      if (staleAssignmentIds.length > 0) {
+        const { error: deleteAssignmentsError } = await adminClient
+          .from('appointment_employees')
+          .delete()
+          .in('id', staleAssignmentIds)
+
+        if (deleteAssignmentsError) {
+          return { success: false, error: deleteAssignmentsError.message }
+        }
+      }
+
+      if (newEmployeeIds.length > 0) {
+        const assignmentInserts: TablesInsert<'appointment_employees'>[] = newEmployeeIds.map(
           (employeeId) => ({
             appointment_id: id,
             employee_id: employeeId,
@@ -903,14 +955,50 @@ export async function cancelAppointment(id: string): Promise<AppointmentActionRe
   }
 
   const adminClient = createAdminClient()
-  const { error } = await adminClient
+  const { data: currentAppointment, error: loadError } = await adminClient
     .from('appointments')
-    .update({ status: 'cancelled' })
+    .select('id, status')
     .eq('id', id)
     .eq('is_archived', false)
+    .maybeSingle()
+
+  if (loadError) {
+    return { success: false, error: loadError.message }
+  }
+
+  if (!currentAppointment) {
+    return { success: false, error: 'Appointment not found.' }
+  }
+
+  if (currentAppointment.status === 'completed') {
+    return {
+      success: false,
+      error: 'A completed appointment cannot be cancelled. Completed is a final status.',
+    }
+  }
+
+  if (currentAppointment.status === 'cancelled') {
+    return { success: false, error: 'This appointment is already cancelled.' }
+  }
+
+  const { data: cancelledAppointment, error } = await adminClient
+    .from('appointments')
+    .update({ status: 'cancelled', status_before_cancel: currentAppointment.status })
+    .eq('id', id)
+    .eq('is_archived', false)
+    .eq('status', currentAppointment.status)
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if (!cancelledAppointment) {
+    return {
+      success: false,
+      error: 'The appointment changed while you were cancelling it. Refresh and try again.',
+    }
   }
 
   revalidatePath('/solutions/appointments')
@@ -930,15 +1018,45 @@ export async function uncancelAppointment(id: string): Promise<AppointmentAction
   }
 
   const adminClient = createAdminClient()
-  const { error } = await adminClient
+  const { data: currentAppointment, error: loadError } = await adminClient
     .from('appointments')
-    .update({ status: 'scheduled' })
+    .select('id, status, status_before_cancel')
+    .eq('id', id)
+    .eq('is_archived', false)
+    .maybeSingle()
+
+  if (loadError) {
+    return { success: false, error: loadError.message }
+  }
+
+  if (!currentAppointment) {
+    return { success: false, error: 'Appointment not found.' }
+  }
+
+  if (currentAppointment.status !== 'cancelled') {
+    return { success: false, error: 'This appointment is not cancelled.' }
+  }
+
+  const restoredStatus = currentAppointment.status_before_cancel ?? 'scheduled'
+
+  const { data: restoredAppointment, error } = await adminClient
+    .from('appointments')
+    .update({ status: restoredStatus, status_before_cancel: null })
     .eq('id', id)
     .eq('is_archived', false)
     .eq('status', 'cancelled')
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if (!restoredAppointment) {
+    return {
+      success: false,
+      error: 'The appointment changed while you were reopening it. Refresh and try again.',
+    }
   }
 
   revalidatePath('/solutions/appointments')

@@ -214,7 +214,7 @@ export default async function AppointmentDetailPage({ params }: AppointmentDetai
                   Reopen
                 </Button>
               </form>
-            ) : (
+            ) : appointment.status === 'completed' ? null : (
               <form action={handleCancelAppointment}>
                 <Button
                   type="submit"

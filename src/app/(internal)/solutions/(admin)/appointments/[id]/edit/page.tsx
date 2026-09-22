@@ -179,6 +179,10 @@ export default async function EditAppointmentPage({ params }: EditAppointmentPag
           <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             This appointment cannot be edited because it has already been completed.
           </section>
+        ) : typedAppointment.status === 'cancelled' ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            This appointment cannot be edited because it has been cancelled. Reopen it to make changes.
+          </section>
         ) : (
           <AppointmentForm
             clients={(clients ?? []).map((client) => ({

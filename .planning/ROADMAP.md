@@ -96,7 +96,7 @@ CRUD for `client_job_pricing` hung off the client detail page, mirroring client-
   still checked at the Phase 2 gate. The pricing routes are new, so REQ-021 does not cover them;
   their proof is this plan's own browser smoke script.
 
-## Phase 4 — Voiding an invoice releases its appointments  ·  status: NOT STARTED  ·  depends on Phases 1 and 2 (both shipped)
+## Phase 4 — Voiding an invoice releases its appointments  ·  status: CODE COMPLETE, verifier PASS ×2, **BLOCKED on the user's browser pass** (corrected 2026-09-22; this line read "NOT STARTED" and was stale — see `STATE.md` Position)  ·  depends on Phases 1 and 2 (both shipped)
 
 **Added 2026-09-21.** GitHub issue **#18**, which is REQ-022 — the defect AMD-1 uncovered during
 the #10 review, deferred by the user then and scheduled by the user now. It is a **pre-existing**
@@ -148,6 +148,58 @@ invariants to match.
   voided *before* it ran. Default is **forward-only** (constitution §7 forbids a migration changing
   a stored amount on `appointments`); the remediation SQL ships commented in the migration header
   with a sizing query. Affects `04-01-T1` only, and only its commented block.
+
+---
+
+## Phase 5 — Cancel/uncancel and edit-guard data loss  ·  status: NOT STARTED  ·  depends on nothing
+
+**Added 2026-09-22.** GitHub issue **#15**, which is REQ-024, REQ-025, REQ-026 and REQ-027. Two
+defects in code shipped by issue **#8** (`1b22ef7`), found during the #10 review and recorded then
+in `STATE.md`. **Pre-existing — neither is caused by the pricing milestone**, and this phase touches
+no pricing code, no invoice code and no employee-facing screen.
+
+An appointment's status is the only record that work happened, and `cancelAppointment` will
+overwrite any status including `completed` while `uncancelAppointment` restores the literal
+`'scheduled'` — so *complete → cancel → reopen* erases the completion silently. Separately, the edit
+guard covers only `completed`, and `updateAppointment` deletes and re-inserts every
+`appointment_employees` row on every edit, discarding clock times, admin notes and the row `id` the
+clock RPC addresses. That second half fires on ordinary `scheduled` appointments and is the widest
+of the four requirements.
+
+- Requirements: **REQ-024, REQ-025, REQ-026, REQ-027**, and **REQ-028** — *added 2026-09-22 after
+  implementation (AMD-5, D-42), to describe the compare-and-set on `updateAppointment` that the
+  post-implementation code review added and the verifier flagged as beyond the REQ text as written.*
+  No existing requirement is amended in substance; REQ-024 and REQ-025 each gain a scope note
+  pointing at REQ-028, and `05-02-PLAN.md` Change 2 is split into Parts A and B.
+- Plans — **two, three tasks, all three dispatchable immediately and concurrently**:
+  - `phases/05-cancel-and-edit-guards/05-01-PLAN.md` — the migration adding
+    `appointments.status_before_cancel` plus its two CHECK constraints and the `database.ts` hand
+    edit (T1, `coder-sr`).
+  - `phases/05-cancel-and-edit-guards/05-02-PLAN.md` — `src/lib/actions/appointments.ts`: the two
+    guards, the marker on both cancel paths, the restore, and the assignment reconcile (T1,
+    `coder-sr`); the two admin screens (T2, `coder-jr`).
+  - Read `05-CONTEXT.md` before any of them. §4 holds the three decisions (D-36 … D-39) and §6 the
+    three out-of-scope findings that must not be fixed here.
+- **Gate.** `npm run lint` at its pre-existing error count, `npx tsc --noEmit` clean, `npm test`
+  17/17, `npm run build` succeeds — **none of which can see any defect in this phase** (D-22);
+  plus `05-01-PLAN`'s **E1–E4** (schema shape, no-backfill count, both CHECKs proven in both
+  directions on real rows, the employee view unchanged, the DOWN executed) and `05-02-PLAN`'s
+  **S1–S3** statement replay, as row counts and catalog reads per constitution §16; plus the
+  **user's 12-step browser script** in `05-02-PLAN.md`, which is the **only** evidence available for
+  REQ-024, REQ-026 and REQ-027 — every one of them lives in a server action, unreachable from SQL
+  and unreachable by URL.
+- **The local database is a shared resource and only the verifier touches it** (D-41, inherited from
+  D-32). All three coders run static gates only.
+- **Verdict contract: PASS or BLOCKED** (D-34), no third state.
+- **Deploy order** (D-40, for the human who ships it — constitution §5): the migration goes out
+  **first or together with** the application code, **never the code alone**. Code-first makes
+  `cancelAppointment` send a column that does not exist, PostgREST answers `400 / 42703`, and the
+  detail page discards the result — **Cancel would silently do nothing.**
+- **Blocked on**: nothing. Phase 5 is independent of Phase 4's outstanding browser pass: it shares
+  no file, no table and no requirement with it.
+- **Open questions**: OQ-C1 (hard-refuse vs record-and-restore for cancelling a completed
+  appointment — default **hard-refuse**, affects `05-02` only) and OQ-C2 (does the Reopen button
+  name the status it restores — default **no**). Neither blocks dispatch.
 
 ---
 
@@ -351,6 +403,61 @@ Files nobody owns and nobody may edit: `supabase/migrations/20260427000000_schem
 (landed migration), `supabase/seed.sql` (comments only), and — per DET-12 —
 `src/app/(internal)/solutions/(admin)/dashboard/page.tsx` and
 `src/app/(internal)/solutions/(admin)/invoices/page.tsx`.
+
+### Phase 5 dispatch — one block, three-wide, no internal dependencies
+
+```
+block 5 (all three concurrent, no edges between them)
+──────────────────────────────────────────────────────
+05-01-T1  coder-sr  20260922120000_appointments_status_before_cancel.sql + database.ts
+05-02-T1  coder-sr  src/lib/actions/appointments.ts — guards, marker, restore, reconcile
+05-02-T2  coder-jr  appointments/[id]/page.tsx + appointments/[id]/edit/page.tsx
+                                          │
+                                          └──▶ verifier (whole phase) ──▶ user browser pass
+```
+
+**There is deliberately no edge from `05-01-T1` to `05-02-T1`.** "Migration and types first, then
+the code that writes the column" is habit here, not a dependency — the same call D-31 made in
+Phase 4, for the same reason. No Supabase client in this project is parameterized with the
+`Database` generic (D-22: `src/lib/supabase/admin.ts:6`, `server.ts:6` are both
+`SupabaseClient<any>`), so `.update({ status_before_cancel: … })` compiles, type-checks and builds
+against the tree as it stands at `d7d0a2c`. It simply has **no effect** until the migration is
+applied. That is a deploy-order property (D-40) and a verification property; verification needs all
+three tasks, and that is a gate, not an edge.
+
+`05-02-T1` and `05-02-T2` are likewise independent: the interface between them is the four status
+values and `AppointmentActionResult`, both already in the tree. The server guard and the hidden
+control are two layers of the same rule, and neither reads the other's code.
+
+**Critical path**: any single task → verifier → the user's browser pass. **One working block** —
+the floor, and the phase is at it.
+
+**REQ-026 is the one requirement that needs no migration at all.** If anything in this phase has to
+be cut or shipped early, it is the half to keep: it is a live data-loss bug on ordinary scheduled
+appointments and `05-02-T1` delivers it whole.
+
+**Owned-file union — zero collisions:**
+
+```
+05-01-T1  supabase/migrations/20260922120000_appointments_status_before_cancel.sql  (new)
+          src/types/database.ts                                        (appointments: 3 lines)
+05-02-T1  src/lib/actions/appointments.ts
+05-02-T2  src/app/(internal)/solutions/(admin)/appointments/[id]/page.tsx
+          src/app/(internal)/solutions/(admin)/appointments/[id]/edit/page.tsx
+```
+
+Files this phase reads and **must not edit**: every landed migration,
+`src/components/admin/appointment-form.tsx` (its status `<select>` keeps all four options),
+`src/components/admin/admin-clock-override.tsx`, `src/lib/actions/attendance.ts`,
+`src/components/admin/appointments-list.tsx` and `appointments/page.tsx` (neither offers a cancel or
+edit affordance), `supabase/checks/pricing_backfill_check.sql` (the coherence CHECK makes the only
+candidate invariant unrepresentable; constitution §14), and everything under `src/lib/pricing/`.
+
+`src/types/database.ts` was `01-01-T1`'s and then `04-01-T1`'s; both shipped, so `05-01-T1` takes it
+with no live overlap. `src/lib/actions/appointments.ts` was `02-02-T1`'s, likewise shipped. **Phase 4
+is still open on the user's browser pass but owns none of these five files** — its set is
+`invoices.ts`, the two invoice builder pages, `pricing_backfill_check.sql` and
+`20260921130000_…sql` — so Phase 5 may run alongside it without waiting.
 
 ## Out of this roadmap entirely
 
