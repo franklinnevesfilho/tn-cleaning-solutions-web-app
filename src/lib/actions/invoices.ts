@@ -53,6 +53,9 @@ const duplicateAppointmentError =
 const linesNotRestoredError =
   "The invoice's previous appointments could not be restored, so it currently has no lines."
 
+const invoiceChangedError =
+  'The invoice changed while this action was in progress. Reload it and try again.'
+
 async function requireAdminRole(): Promise<{ success: true } | { success: false; error: string }> {
   const supabase = await createClient()
   const {
@@ -259,7 +262,9 @@ async function writeBilledPriceCache(lines: InvoiceLine[]): Promise<void> {
   }
 }
 
-async function clearBilledPriceCache(appointmentIds: string[]): Promise<void> {
+async function clearBilledPriceCache(appointmentIds: string[]): Promise<boolean> {
+  let cleared = true
+
   if (appointmentIds.length > 0) {
     const { error } = await createAdminClient()
       .from('appointments')
@@ -268,8 +273,11 @@ async function clearBilledPriceCache(appointmentIds: string[]): Promise<void> {
 
     if (error) {
       console.error('billed_price_cents clear failed', appointmentIds.join(','), error.message)
+      cleared = false
     }
   }
+
+  return cleared
 }
 
 async function restoreInvoiceLines(invoiceId: string, lines: InvoiceLine[]) {
@@ -539,16 +547,22 @@ export async function issueInvoice(id: string): Promise<InvoiceActionResult> {
     return { success: false, error: 'Only draft invoices can be issued.' }
   }
 
-  const { error } = await adminClient
+  const { data: issuedRows, error } = await adminClient
     .from('invoices')
     .update({
       status: 'issued',
       issued_date: currentInvoice.issued_date ?? todayDateString(),
     })
     .eq('id', id)
+    .eq('status', 'draft')
+    .select('id')
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if ((issuedRows ?? []).length === 0) {
+    return { success: false, error: invoiceChangedError }
   }
 
   revalidateInvoicePaths(id)
@@ -584,10 +598,19 @@ export async function markInvoicePaid(id: string): Promise<InvoiceActionResult> 
     return { success: false, error: 'Only issued invoices can be marked as paid.' }
   }
 
-  const { error } = await adminClient.from('invoices').update({ status: 'paid' }).eq('id', id)
+  const { data: paidRows, error } = await adminClient
+    .from('invoices')
+    .update({ status: 'paid' })
+    .eq('id', id)
+    .eq('status', 'issued')
+    .select('id')
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if ((paidRows ?? []).length === 0) {
+    return { success: false, error: invoiceChangedError }
   }
 
   revalidateInvoicePaths(id)
@@ -623,13 +646,56 @@ export async function voidInvoice(id: string): Promise<InvoiceActionResult> {
     return { success: false, error: 'Only draft or issued invoices can be voided.' }
   }
 
-  const { error } = await adminClient.from('invoices').update({ status: 'void' }).eq('id', id)
+  const { data: voidedRows, error } = await adminClient
+    .from('invoices')
+    .update({ status: 'void' })
+    .eq('id', id)
+    .in('status', ['draft', 'issued'])
+    .select('id')
 
   if (error) {
     return { success: false, error: error.message }
   }
 
+  if ((voidedRows ?? []).length === 0) {
+    return { success: false, error: invoiceChangedError }
+  }
+
+  // Order is status -> release -> clear, and it must stay that way. A release that fails after the
+  // status write leaves the invoice void with its appointments still consumed, which is the
+  // behaviour this action has always had. Releasing first would let a failed status write leave a
+  // draft or issued invoice still totalling lines whose appointments are billable again — a
+  // double-billing window.
+  const { data: releasedRows, error: releaseError } = await adminClient
+    .from('invoice_appointments')
+    .update({ is_archived: true })
+    .eq('invoice_id', id)
+    .eq('is_archived', false)
+    .select('appointment_id')
+
+  if (releaseError) {
+    revalidateInvoicePaths(id)
+    return {
+      success: false,
+      error: 'The invoice was voided, but its appointments were not released.',
+    }
+  }
+
+  const releasedAppointmentIds = ((releasedRows ?? []) as Array<{ appointment_id: string }>).map(
+    (row) => row.appointment_id
+  )
+  const cleared = await clearBilledPriceCache(releasedAppointmentIds)
+
   revalidateInvoicePaths(id)
+
+  if (!cleared) {
+    return {
+      success: false,
+      error:
+        'The invoice was voided and its appointments were released, but their cached invoiced amounts were not cleared.',
+    }
+  }
+
   return { success: true, data: { id } }
 }
 

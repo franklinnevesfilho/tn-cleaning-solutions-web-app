@@ -79,6 +79,10 @@ WITH "job_reinterpretation" AS (
 ), "invariant" AS (
     -- Each of these must be 0. A non-zero count means the backfill did not do what the migration
     -- claims, and nothing downstream should be trusted until it reads 0 again.
+    --
+    -- The two appointment-cache invariants are one iff: a cache value exists exactly when a live
+    -- (is_archived = false) junction row claims the appointment, and then it matches that row's
+    -- billed_amount_cents; a released row is a historical record and claims nothing.
     SELECT 'junction rows with no billed amount' AS "subject", count(*) AS "offending"
     FROM "public"."invoice_appointments" "ia"
     WHERE "ia"."billed_amount_cents" IS NULL
@@ -87,15 +91,15 @@ WITH "job_reinterpretation" AS (
     FROM "public"."invoice_appointments" "ia"
     WHERE ("ia"."billed_rate_cents" IS NULL) <> ("ia"."billed_minutes" IS NULL)
     UNION ALL
-    SELECT 'appointment cache disagrees with its junction row', count(*)
+    SELECT 'appointment cache disagrees with its live junction row', count(*)
     FROM "public"."appointments" "a"
-    JOIN "public"."invoice_appointments" "ia" ON ("ia"."appointment_id" = "a"."id")
+    JOIN "public"."invoice_appointments" "ia" ON ("ia"."appointment_id" = "a"."id" AND "ia"."is_archived" = false)
     WHERE "a"."billed_price_cents" IS DISTINCT FROM "ia"."billed_amount_cents"
     UNION ALL
-    SELECT 'appointment cached a price with no junction row', count(*)
+    SELECT 'appointment cached a price with no live junction row', count(*)
     FROM "public"."appointments" "a"
     WHERE "a"."billed_price_cents" IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM "public"."invoice_appointments" "ia" WHERE "ia"."appointment_id" = "a"."id")
+        AND NOT EXISTS (SELECT 1 FROM "public"."invoice_appointments" "ia" WHERE "ia"."appointment_id" = "a"."id" AND "ia"."is_archived" = false)
     UNION ALL
     SELECT 'jobs with a negative rate', count(*)
     FROM "public"."jobs" "j"

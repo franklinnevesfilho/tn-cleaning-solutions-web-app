@@ -79,20 +79,33 @@ It emits, each under a literal label:
    > `i.status <> 'void'`) was made to accommodate the unratified code change and must be
    > reverted under Branch A — see 02-03-T2.
    >
-   > **Branch B — AMD-1 overturned, i.e. `voidInvoice` clears the cache (and only if REQ-022 also
-   > lands, since a half-fix is not acceptable).** A junction row on a `void` invoice is a
-   > historical record, not a claim, and **both** invariants must exclude it:
-   > - *appointment cache disagrees with its junction row* counts only pairs whose invoice is not
-   >   `void`.
-   > - *appointment cached a price with no junction row* must likewise become "…with no **live**
-   >   junction row": `billed_price_cents IS NOT NULL` AND `NOT EXISTS` a junction row whose
-   >   invoice is not `void`. Narrowing the first alone would make an appointment that kept a
-   >   stale cache after a void — precisely the drift Branch B introduces the risk of — invisible
-   >   to both invariants, because the first would skip it on status and the second would find a
-   >   junction row and pass it.
+   > **Branch B — REQ-022 lands, so a released junction row is no longer a claim.
+   > AMENDED 2026-09-21 (AMD-3); this is the branch now in force, delivered by `04-01-T2`.**
+   > A junction row marked `is_archived = true` is a retained historical record, not a claim, and
+   > **both** invariants must exclude it:
+   > - *appointment cache disagrees with its **live** junction row* — `appointments` ⋈
+   >   `invoice_appointments` on `appointment_id` **AND `ia.is_archived = false`**, counting
+   >   `a.billed_price_cents IS DISTINCT FROM ia.billed_amount_cents`.
+   > - *appointment cached a price with no **live** junction row* — `billed_price_cents IS NOT
+   >   NULL` AND `NOT EXISTS` a junction row for it **with `is_archived = false`**.
    >
-   > Under either branch the invariant labels and the "must be 0" contract are unchanged, the
-   > script stays a single `UNION ALL` statement, and it still writes nothing.
+   > Narrowing the first alone would make an appointment that kept a stale cache through a void
+   > invisible to both invariants, because the first would skip it and the second would find a
+   > junction row and pass it. **They move together or not at all** (D-25).
+   >
+   > **There is no join to `invoices` and no `status` predicate in either branch.** The original
+   > Branch B wording said "whose invoice is not `void`"; that is dropped. Under REQ-022 release is
+   > the primary signal, the two predicates agree on every row the application produces going
+   > forward, and they disagree only on invoices voided *before* the Phase 4 migration — which hold
+   > live junction rows backed by correct caches, and which a status predicate would report as a
+   > false "MUST BE 0". `is_archived` alone is correct under either answer to OQ-V1.
+   >
+   > **AMD-3b:** the two labels gain the word *live*, as written above. This supersedes the "labels
+   > unchanged" clause below for these two invariants only: a label that still says "its junction
+   > row" after the predicate has been narrowed asserts something the query no longer checks.
+   >
+   > Otherwise the "must be 0" contract is unchanged, the script stays a single `UNION ALL`
+   > statement, and it still writes nothing.
 4. **Informational**: every invoice where `invoices.total_cents <> SUM(billed_amount_cents)`,
    listed with ids and the difference. Pre-existing drift is printed, **never auto-corrected**
    (constitution §7).
@@ -555,6 +568,13 @@ override field. `appointments.price_override_cents` keeps its present meaning, u
   > an invoice permanently consumes its appointments. It is carried as **REQ-022** and must be
   > fixed whole or not at all. Until REQ-022 lands, `voidInvoice` writes `billed_price_cents`
   > never.
+  >
+  > > **AMD-4, 2026-09-21 — the sentence above has expired.** REQ-022 is scheduled as **Phase 4**
+  > > (GitHub issue #18). From `04-02-T1` onward, `voidInvoice` **does** clear
+  > > `billed_price_cents`, for exactly the appointments whose junction rows it just released, and
+  > > only after the status write and the release write have both succeeded (REQ-022(d)). D-23 is
+  > > not overturned — its premise (the appointment stays unbillable) is removed. See the split
+  > > acceptance bullet below.
 - Backfill: after the junction backfill, `UPDATE appointments a SET billed_price_cents =
   ia.billed_amount_cents FROM invoice_appointments ia WHERE ia.appointment_id = a.id`.
 
@@ -564,12 +584,19 @@ override field. `appointments.price_override_cents` keeps its present meaning, u
 - Overtyping the line in the draft builder and saving updates both, still equal.
 - Removing it from the draft invoice sets `billed_price_cents` back to NULL and the appointment
   reverts to showing the derived price.
-- Issuing, voiding, archiving or restoring the invoice leaves `billed_price_cents` untouched.
-  **Upheld 2026-09-21 (AMD-1)** against the Phase 2 review's challenge, and **ratified by the user
-  the same day (OQ-R1 option (a))** — see the amendment note above and REQ-022. The violating code
-  at `src/lib/actions/invoices.ts` (formerly `:632-641`) **has been reverted (02-03-T1)** and the
-  matching check-script narrowing undone (02-03-T2); `voidInvoice` now writes only the status.
-  **This acceptance criterion is satisfied.**
+- **Split by AMD-4, 2026-09-21.** **Issuing, archiving or restoring** the invoice leaves
+  `billed_price_cents` untouched — unchanged, still in force, and still a hard boundary (D-24: an
+  archived *paid* invoice is money the client really was charged). **Voiding** now clears it, for
+  exactly the appointments the void releases (REQ-022(d), Phase 4, `04-02-T1`).
+  > **Superseded text, kept for audit:** *"Issuing, voiding, archiving or restoring the invoice
+  > leaves `billed_price_cents` untouched. **Upheld 2026-09-21 (AMD-1)** against the Phase 2
+  > review's challenge, and **ratified by the user the same day (OQ-R1 option (a))** — see the
+  > amendment note above and REQ-022. The violating code at `src/lib/actions/invoices.ts` (formerly
+  > `:632-641`) **has been reverted (02-03-T1)** and the matching check-script narrowing undone
+  > (02-03-T2); `voidInvoice` now writes only the status. **This acceptance criterion is
+  > satisfied.**"* That was correct for Phases 1–3 and is the baseline `04-02-T1` starts from. It is
+  > superseded only on the `voidInvoice` clause, and only because REQ-022 now lands alongside it —
+  > which is the precondition OQ-R1 option (c) named.
 - Changing the job's `hourly_rate_cents` afterwards leaves it untouched.
 - `grep -rn "billed_price_cents" src/lib/pricing/` returns nothing — the resolver never sees it.
 - The check script's reconciliation invariants (REQ-002 item 3) report 0.
@@ -667,13 +694,33 @@ exists it must already be excluded. **Phase**: 1.
 
 ---
 
-### REQ-022 — Voiding an invoice releases its appointments  ·  P1  ·  *(new 2026-09-21, AMD-1; **PROPOSED — DEFERRED OUT OF THIS MILESTONE**)*
+### REQ-022 — Voiding an invoice releases its appointments  ·  P1  ·  *(new 2026-09-21, AMD-1; **SCHEDULED — Phase 4**)*
 
-**Status, updated 2026-09-21: OQ-R1 is resolved — the user ratified option (a), so `voidInvoice`
-does NOT clear the cache and the half-fix that had shipped was reverted (`02-03-PLAN`). The user
-has separately ruled on REQ-022 itself: DEFER. It is to be filed as its own GitHub issue (the user
-is filing it; no agent should create it) and is explicitly NOT scheduled in this milestone. No task
-implements it. It remains written down here so the defect AMD-1 uncovered is not lost.**
+**Status, updated 2026-09-21 (second revision): SCHEDULED.** The user filed this as GitHub issue
+**#18** and has now scheduled it. It is **Phase 4**, delivered by
+`phases/04-void-releases-appointments/04-01-PLAN.md` (T1 migration + `database.ts`, T2 check
+script) and `04-02-PLAN.md` (T1 `voidInvoice`, T2 both builders). All four tasks are dispatchable
+immediately and concurrently; see `ROADMAP.md`.
+
+> **Superseded status line (2026-09-21, first revision), kept for audit:** *"OQ-R1 is resolved —
+> the user ratified option (a), so `voidInvoice` does NOT clear the cache and the half-fix that had
+> shipped was reverted (`02-03-PLAN`). The user has separately ruled on REQ-022 itself: DEFER. It
+> is to be filed as its own GitHub issue (the user is filing it; no agent should create it) and is
+> explicitly NOT scheduled in this milestone. No task implements it."* The OQ-R1 half of that
+> statement still stands and is what `04-02-T1` starts from: the tree is at the clean pre-REQ-022
+> baseline, `voidInvoice` writing only the status. Only the DEFER half is reversed.
+>
+> **D-23 is not overturned by this.** D-23 held that `voidInvoice` must not clear the cache *while
+> the appointment remains unbillable*. Phase 4 removes that premise. D-24 (archive/restore never
+> write the cache) survives unchanged and is a hard boundary on `04-02-T1`.
+
+> **Issue #18's phrasing, reconciled (2026-09-21).** #18 asks to *"scope the unique constraint on
+> `invoice_appointments.appointment_id` to non-void invoices (partial unique index)"*. That is not
+> expressible: a partial index predicate cannot read another table, and `invoice_appointments` has
+> no status column. **Clause (b) below is the technically correct reading and is confirmed.** The
+> issue's intent is satisfied through the `is_archived` release marker rather than through an
+> invoice-status predicate — which is equivalent in behaviour precisely because `voidInvoice` is
+> the only thing that sets the marker. See `phases/04-void-releases-appointments/04-CONTEXT.md §2`.
 
 **It must still be built whole or not at all** — the partial unique index, both invoice-builder
 filters, the action change and the check-script narrowing land together, or the result is a visit
@@ -719,24 +766,67 @@ the admin do. The four parts:
   visibility flag, an archived *paid* invoice is still money that was billed, and clearing there
   would show a price the client was in fact charged as though it had never been charged.
 
-**Acceptance**
+**Acceptance** *(sharpened into checkable form 2026-09-21 when the requirement was scheduled; the
+substance of every bullet is unchanged except where AMD-3 is marked)*
+
+*Schema — `04-01-T1`:*
+- `SELECT count(*) FROM pg_constraint WHERE conname = 'invoice_appointments_appointment_id_key'`
+  returns **0**, and `pg_indexes` shows exactly one
+  `invoice_appointments_live_appointment_id_idx` whose `indexdef` contains
+  `WHERE (is_archived = false)`.
+- Two junction rows for one `appointment_id`, both with `is_archived = false`, are rejected with
+  SQLSTATE **23505**. With the first row's `is_archived` set to `true` first, both persist and
+  `count(*) … WHERE appointment_id = '<id>'` returns **2**.
+- `invoice_appointments_pkey` (`invoice_id, appointment_id`) is untouched and still rejects a
+  duplicate line within one invoice.
+- `SELECT count(*) FROM invoice_appointments WHERE is_archived = true` is **0** immediately after
+  `supabase db reset` — the migration runs no backfill (see OQ-V1 in `04-CONTEXT.md §6`).
+- `src/types/database.ts` carries the change in the same task (constitution §9): the
+  `invoice_appointments_appointment_id_fkey` relationship becomes `isOneToOne: false`.
+
+*Behaviour — `04-02-T1`, `04-02-T2`:*
 - Issue an invoice over an appointment, void it: the appointment appears in the new-invoice
   builder again, shows its live derived price, and shows no "Invoiced" chip.
-- Invoicing it again succeeds: a second `invoice_appointments` row is created and the UNIQUE does
-  not fire.
+- Invoicing it again succeeds: a second `invoice_appointments` row is created and the unique rule
+  does not fire, with no "already attached to another invoice" error.
+- An appointment held by a **live** junction row is still excluded from both builders, and a
+  hand-crafted attempt to invoice it still surfaces `duplicateAppointmentError`. The relaxation
+  must not remove the double-billing guard.
 - The voided invoice's own row and junction rows still exist with their original
   `billed_amount_cents`, `billed_rate_cents`, `billed_minutes`, and its `total_cents` is unchanged.
-- The voided invoice's detail page still renders its original lines and total.
-- `archiveInvoice` and `restoreInvoice` leave every `billed_price_cents` untouched, void or not.
-- `pricing_backfill_check.sql` §3 reads 0 throughout, with both cache invariants written per
-  REQ-002 **Branch B** — additionally excluding released (`is_archived = true`) junction rows from
-  "a live junction row", not only void ones, since (a) makes release the primary signal.
-- `src/types/database.ts` carries the constraint/index change in the same task (constitution §9).
+- The voided invoice's detail page still renders its original lines, their rate × minutes
+  breakdown, and its total.
+- `archiveInvoice` and `restoreInvoice` leave every `billed_price_cents` untouched and every
+  junction row's `is_archived` untouched — on a void invoice **and** on a paid one (D-24).
+- Voiding a draft invoice with no lines succeeds; voiding a paid invoice is still refused.
 
-**Depends on**: REQ-018 (the cache exists), REQ-006 (the frozen line exists). **Phase**: none —
-**deferred out of this milestone by the user, 2026-09-21**, to be filed as its own GitHub issue.
-It is a migration plus two page queries plus one action, and it does **not** belong inside Phase
-2's remaining work.
+*Reporting — `04-01-T2`:*
+- `pricing_backfill_check.sql` §3 reads 0 throughout, run **after** a void has left a released row
+  in the database, with both cache invariants narrowed **together** (D-25).
+  > **AMD-3, 2026-09-21 — this bullet's predicate is narrowed.** It previously read: *"…written per
+  > REQ-002 **Branch B** — additionally excluding released (`is_archived = true`) junction rows
+  > from 'a live junction row', not only void ones, since (a) makes release the primary signal."*
+  > Read literally that is two predicates: not released **and** not on a void invoice. **The
+  > invoice-status predicate is dropped; `invoice_appointments.is_archived = false` alone defines a
+  > live junction row.** Reason: the two are equivalent for every row this application produces
+  > going forward, but *not* for invoices voided before Phase 4 — those hold live junction rows
+  > with correct, populated caches, which a status predicate would report as a false "MUST BE 0"
+  > alarm (the first invariant skips them on status while the second finds no "live" row). The
+  > `is_archived`-only wording is correct under either answer to OQ-V1 and is the honest statement
+  > of what the system now means by "spoken for". **REQ-002's Branch B is amended to match**; see
+  > there.
+  > **AMD-3b:** both invariant labels gain the word *live*, against REQ-002 Branch B's "labels
+  > unchanged" clause. A label reading "its junction row" after the predicate has been narrowed
+  > asserts something the query no longer checks, and a human reads this file for a number that
+  > must be 0.
+
+**Depends on**: REQ-018 (the cache exists), REQ-006 (the frozen line exists). Both shipped in
+Phases 1–2. **Phase**: **4** — scheduled 2026-09-21 as GitHub issue #18.
+
+**Rests on an assumption**: OQ-V1 (`04-CONTEXT.md §6`). The forward-only default means invoices
+voided *before* the Phase 4 migration keep their appointments consumed. If the user rules that they
+must be released too, `04-01-T1` gains two `UPDATE` statements and the constitution gains a named
+§7 exception; no other requirement or task changes.
 
 ---
 
@@ -791,7 +881,9 @@ and edit it — the admin cannot discover this from the screen.
 | REQ-021 | 2 | 02-01 · T1, T2 and 02-02 · T1, T2 smoke scripts; enforced at the Phase 2 gate |
 | REQ-018 (AMD-1 remediation) | 2 | 02-03 · T1 (revert `voidInvoice`) |
 | REQ-002 (AMD-2 remediation) | 2 | 02-03 · T2 (restore the check's cache invariants) |
-| REQ-022 | — | **none — PROPOSED, DEFERRED out of this milestone by the user 2026-09-21; to be filed as its own GitHub issue (the user is filing it). OQ-R1 is resolved as (a).** |
+| REQ-022 | **4** | **SCHEDULED 2026-09-21 as GitHub issue #18.** 04-01 · T1 (partial unique index + `database.ts`), T2 (check-script narrowing); 04-02 · T1 (`voidInvoice` releases + clears), T2 (both builder queries). **All-or-nothing: no subset closes it.** |
+| REQ-002 (AMD-3 / AMD-3b) | 4 | 04-01 · T2 — Branch B in force, narrowed to `is_archived` with no invoice-status predicate, both invariants together (D-25). |
+| REQ-018 (AMD-4) | 4 | 04-02 · T1 — the `voidInvoice` clause of REQ-018's acceptance is split; archive/restore/issue unchanged (D-24). |
 | REQ-023 | 3 | 03-02 · T1 (partial unique index on `client_job_pricing`) |
 
 REQ-019 and REQ-020 are jointly delivered by both `01-03` tasks and **neither can PASS alone**: T1
