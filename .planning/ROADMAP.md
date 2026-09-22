@@ -6,6 +6,10 @@ ARCH-1 turned an additive migration into a rename, and ARCH-5 added a whole task
 Three phases, six plans, **eleven tasks**. **Phases 2 and 3 have no dependency on each other** and
 are intended to run concurrently once Phase 1 has landed.
 
+> **Phase 4 added 2026-09-21** — GitHub issue #18 / REQ-022, scheduled by the user after being
+> deferred during #10. Two plans, four tasks, all four concurrent. It is a follow-on to this
+> milestone rather than part of its original three phases, and it has its own gate.
+
 > Amended again 2026-09-18: ARCH-5 was revised to option **(b)** — full price confidentiality,
 > including appointment price fields (D-21, REQ-020). `01-03` split into two sequential tasks as a
 > result. `tsconfig.json` gained `allowImportingTsExtensions` and belongs to `01-02-T1` (DET-8).
@@ -91,6 +95,59 @@ CRUD for `client_job_pricing` hung off the client detail page, mirroring client-
   whole run must stay clean — an error here is a defect, not Phase 2 ripple. `npm run build` is
   still checked at the Phase 2 gate. The pricing routes are new, so REQ-021 does not cover them;
   their proof is this plan's own browser smoke script.
+
+## Phase 4 — Voiding an invoice releases its appointments  ·  status: NOT STARTED  ·  depends on Phases 1 and 2 (both shipped)
+
+**Added 2026-09-21.** GitHub issue **#18**, which is REQ-022 — the defect AMD-1 uncovered during
+the #10 review, deferred by the user then and scheduled by the user now. It is a **pre-existing**
+defect, not introduced by #10.
+
+Voiding an invoice is terminal, and `invoice_appointments_appointment_id_key UNIQUE
+(appointment_id)` is global and status-blind, so a visit that was invoiced, disputed and voided can
+never be billed again. This phase replaces that constraint with a partial unique index over **live**
+junction rows, makes `voidInvoice` mark its own rows released and clear their display cache,
+teaches both invoice builders to ignore released rows, and narrows the check script's two cache
+invariants to match.
+
+- Requirements: **REQ-022** (whole), plus the amendments it forces — REQ-002 (AMD-3, AMD-3b) and
+  REQ-018 (AMD-4).
+- Plans — **two, four tasks, all four dispatchable immediately and concurrently**:
+  - `phases/04-void-releases-appointments/04-01-PLAN.md` — the migration + the one `database.ts`
+    field (T1, `coder-sr`); the check-script narrowing (T2, `coder-jr`).
+  - `phases/04-void-releases-appointments/04-02-PLAN.md` — `voidInvoice` (T1, `coder-sr`); both
+    builder queries (T2, `coder-jr`).
+  - Read `04-CONTEXT.md` before any of them. §2 resolves issue #18's "scoped to non-void invoices"
+    phrasing against REQ-022(b)'s `is_archived` predicate — the index keys on the release marker
+    because a partial index cannot read another table.
+- **Gate — all-or-nothing (REQ-022).** No task in this phase passes alone; a partial fix leaves a
+  visit that looks billable and is not. The gate is: `npm run lint`, `npx tsc --noEmit`,
+  `npm run build`, `npm test` all clean; `04-01-PLAN`'s **E1–E6** SQL evidence as row counts
+  (constitution §16), including the pair that *is* REQ-022(b) — a second **live** junction row
+  rejected with 23505, and the same insert **accepted** once the first row is released; the
+  **user's manual browser pass** (`04-02-PLAN`'s 18-step script — the user runs every browser pass
+  in this project and no agent starts one); and `pricing_backfill_check.sql` §3 all 0 **run after
+  that pass has left a released row in the database** — a run against a database with no voided
+  invoice proves nothing about the new predicate.
+- **The local database is a shared resource and only the verifier touches it** (D-32,
+  `04-CONTEXT.md §7.0`). The four coders run **static gates only** — diff, grep, lint, `tsc`, and
+  `build` for `04-02-T2`. Every DB-state criterion is executed once, serially, in a single verifier
+  pass after all four land, because E1's "0 rows after reset" counts and E5's fixture rows falsify
+  each other if they run concurrently. The **DOWN path (E6) is the verifier's**, so `04-01-T1`
+  ships its header with the precedent's "NOT yet executed" wording; the verifier cannot edit files,
+  so on success it reports the header line to correct and the orchestrator dispatches that one-line
+  edit as the phase's last change.
+- **Verdict contract: PASS or BLOCKED.** Until the user's browser pass is reported back, the
+  phase-level verdict is **BLOCKED** and the next action is to relay the script — not to close the
+  phase. There is no "verified, phase not closed".
+- **Deploy order** (D-33, for the human who ships it — constitution §5): the migration goes out
+  **first or together with** the application code, **never the code alone**. Code-first is exactly
+  the half-fix REQ-022 forbids. Carry this into the phase summary handed to the user.
+- **Blocked on**: nothing. Phases 1 and 2 shipped; the column the whole phase keys on
+  (`invoice_appointments.is_archived`) has existed since `20260918120000` and is already typed.
+- **Open question**: OQ-V1 — whether the migration also releases appointments consumed by invoices
+  voided *before* it ran. Default is **forward-only** (constitution §7 forbids a migration changing
+  a stored amount on `appointments`); the remediation SQL ships commented in the migration header
+  with a sizing query. Affects `04-01-T1` only, and only its commented block.
 
 ---
 
@@ -238,6 +295,57 @@ BLOCK 2
           src/app/(internal)/solutions/(admin)/clients/[id]/pricing/[pricingId]/edit/page.tsx
           src/app/(internal)/solutions/(admin)/clients/[id]/page.tsx
 ```
+
+### Phase 4 dispatch — one block, four-wide, no internal dependencies
+
+```
+block 4 (all four concurrent, no edges between them)
+──────────────────────────────────────────────────────
+04-01-T1  coder-sr  20260921130000_void_releases_appointments.sql + database.ts
+04-01-T2  coder-jr  pricing_backfill_check.sql — both cache invariants
+04-02-T1  coder-sr  voidInvoice — release + clear
+04-02-T2  coder-jr  invoices/new + invoices/[id]/edit — one .eq() each
+                                          │
+                                          └──▶ verifier (whole phase) ──▶ user browser pass
+```
+
+**File exclusivity makes the four concurrent; the single local database does not.** All four coders
+run static gates only, and every database check in the phase belongs to the one serial verifier
+pass drawn above (D-32). That is a verification constraint, not a dependency — it does not narrow
+the block, it just means no coder resets or fixtures a database another coder is reading.
+
+**There is deliberately no edge from `04-01-T1` to anything.** The tempting sequencing — "migration
+and types first, then the queries and the action" — is habit, not a dependency.
+`invoice_appointments.is_archived` has existed since
+`20260918120000_hourly_pricing_and_client_job_pricing.sql:142-145` and is already typed in
+`src/types/database.ts:487,497,507`, so every query and update `04-02` writes compiles,
+type-checks and executes against the database as it stands at `926f088`. They simply have no
+*effect* until the index lands. The only thing that needs all four is **verification**, and that is
+a gate property. Serialising here would turn a one-block phase into a four-block one for nothing.
+
+**Critical path**: any single task → verifier → the user's browser pass. **One working block.**
+That is the floor, and the phase is already at it.
+
+**Owned-file union — zero collisions:**
+
+```
+04-01-T1  supabase/migrations/20260921130000_void_releases_appointments.sql   (new)
+          src/types/database.ts                                              (one field)
+04-01-T2  supabase/checks/pricing_backfill_check.sql
+04-02-T1  src/lib/actions/invoices.ts                                        (voidInvoice only)
+04-02-T2  src/app/(internal)/solutions/(admin)/invoices/new/page.tsx
+          src/app/(internal)/solutions/(admin)/invoices/[id]/edit/page.tsx
+```
+
+Files this phase reads and **must not edit**: every landed migration,
+`src/app/(internal)/solutions/(admin)/invoices/[id]/page.tsx` (the voided invoice must keep
+rendering its released lines), `src/components/admin/invoice-form.tsx`, and everything under
+`src/lib/pricing/`.
+
+`src/lib/actions/invoices.ts` was `02-02-T2`'s and then `02-03-T1`'s; both have shipped, so
+`04-02-T1` takes it with no live overlap. `src/types/database.ts` was `01-01-T1`'s, likewise
+shipped. `supabase/checks/pricing_backfill_check.sql` was `02-03-T2`'s, likewise shipped — the
+concurrent-agent hold noted below was released on 2026-09-21.
 
 Files nobody owns and nobody may edit: `supabase/migrations/20260427000000_schema_snapshot.sql`
 (landed migration), `supabase/seed.sql` (comments only), and — per DET-12 —

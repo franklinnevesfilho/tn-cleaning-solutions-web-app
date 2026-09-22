@@ -81,7 +81,11 @@ export default async function EditInvoicePage({ params }: EditInvoicePageProps) 
       .from('invoice_appointments')
       .select('appointment_id, billed_amount_cents, billed_rate_cents, billed_minutes')
       .eq('invoice_id', id),
-    supabase.from('invoice_appointments').select('invoice_id, appointment_id'),
+    // A released row (a line on a voided invoice) is a historical record and no longer claims its appointment.
+    supabase
+      .from('invoice_appointments')
+      .select('invoice_id, appointment_id')
+      .eq('is_archived', false),
     supabase
       .from('appointments')
       .select(appointmentSelect)
