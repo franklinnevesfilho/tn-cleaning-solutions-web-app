@@ -854,6 +854,179 @@ and edit it — the admin cannot discover this from the screen.
 
 ---
 
+### REQ-024 — A cancellation never overwrites a completed appointment  ·  P0  ·  *(new 2026-09-22; GitHub issue #15; **SCHEDULED — Phase 5**)*
+
+`cancelAppointment` (`src/lib/actions/appointments.ts:895-920`) has no status filter of any kind, so
+it will set `status = 'cancelled'` on an appointment whose status is `completed`. The detail page
+offers the Cancel control for every status but `cancelled`
+(`appointments/[id]/page.tsx:207-227`), completed included. Combined with REQ-025's defect, the
+completion is then unrecoverable.
+
+**Acceptance:**
+- `cancelAppointment` refuses an appointment whose status is `completed` and returns an explicit
+  error; the stored status is unchanged, verified by SQL after the attempt.
+- `cancelAppointment` also refuses an appointment already at `cancelled`, with its own message. This
+  is reachable from a stale page and, without the refusal, would write an illegal marker value.
+- The appointment detail page renders **no** Cancel control when the status is `completed`. It is
+  hidden, not disabled, and no error text is displayed — the page's server-action wrappers discard
+  results, so an error return would be invisible (D-37).
+- The Edit control is unchanged and still rendered for every status.
+- The cancel write is a compare-and-set on the status read a moment earlier, so a concurrent status
+  change cannot be silently overwritten.
+  > **Scope note, added 2026-09-22 (AMD-5).** This bullet is about `cancelAppointment` and stays
+  > that way. The same protection on the **form's** cancel path — `updateAppointment` — is **not**
+  > this requirement; it is **REQ-028**, added post-implementation. Read the two together: REQ-024
+  > closes the button path, REQ-028 closes the form path, and the defect is identical on both.
+
+**Depends on**: nothing. **Phase**: 5 (`05-02`).
+
+---
+
+### REQ-025 — Reopening restores the status the cancellation replaced  ·  P0  ·  *(new 2026-09-22; GitHub issue #15; **SCHEDULED — Phase 5**)*
+
+`uncancelAppointment` (`:922-948`) writes the literal `'scheduled'`, so an appointment cancelled
+while `in_progress` comes back as `scheduled` and — before REQ-024 — an appointment cancelled while
+`completed` came back as `scheduled` with no record it was ever completed. Nothing else in the row
+records the prior status: completion is an explicit admin write, an appointment can be completed
+with no crew at all, and `employee_clock` has no status predicate, so clock times are not a proxy.
+
+**Acceptance:**
+- `appointments` carries `status_before_cancel text NULL`, added by an **additive** migration with
+  **no backfill** and verified DOWN SQL in its header comment (constitution §4), and the matching
+  hand edit to `src/types/database.ts` lands in the same task (constitution §9).
+- Two CHECK constraints hold the invariant: the value is one of
+  `'scheduled' | 'in_progress' | 'completed'` or NULL, **and** it is non-NULL only while
+  `status = 'cancelled'`. `'cancelled'` is rejected as a value. Both are proven to fire, on real
+  rows, in both directions.
+- The marker is written by **both** paths into `cancelled` — `cancelAppointment` and
+  `updateAppointment`'s status field — and cleared by `uncancelAppointment`. No other code writes it.
+  > **Amendment 2026-09-22 (AMD-5), cause: post-implementation `/code-review high`.** This bullet
+  > required only that the marker be *written* on both paths. It said nothing about the marker being
+  > **true**, and on the `updateAppointment` path it can be false: the status is read at
+  > `appointments.ts:633-638` and written many statements later, so a concurrent completion in
+  > another tab is overwritten and the marker records `'scheduled'` for a row that was `completed`.
+  > The write that closes that gap is specified in **REQ-028**, not here. The original text of this
+  > bullet is unchanged and still correct as far as it goes.
+- Reopening restores the recorded status exactly: `in_progress` comes back as `in_progress`.
+- Reopening a row whose marker is NULL restores `'scheduled'`. NULL means *not recorded* — every row
+  cancelled before this phase — and that fallback is the documented behaviour, not a defensive
+  guess.
+- The column is **not** added to `appointments_employee_view`, which lists its columns explicitly.
+- No existing stored value changes. Rows already at `status = 'cancelled'` keep NULL.
+
+**Depends on**: nothing. Delivered jointly with REQ-024. **Phase**: 5 (`05-01` schema, `05-02`
+behaviour).
+
+---
+
+### REQ-026 — Editing an appointment never destroys clock data  ·  P0  ·  *(new 2026-09-22; GitHub issue #15; **SCHEDULED — Phase 5**)*
+
+`updateAppointment` deletes every `appointment_employees` row for the appointment and re-inserts one
+per submitted employee (`:739-764`) on **every** non-`series` edit. That discards `clocked_in_at`,
+`clocked_out_at` and `admin_notes`, and changes the row `id` that both `updateClockTime` and the
+`employee_clock` RPC address. **This fires on ordinary `scheduled` appointments** — an employee
+clocks in, an admin fixes the end time, the hours are gone — so it is independent of cancellation
+and is the widest defect in issue #15.
+
+**Acceptance:**
+- An edit that keeps an employee assigned leaves that employee's row **completely unwritten**: same
+  `id`, same `clocked_in_at`, same `clocked_out_at`, same `admin_notes`, same `is_archived`.
+- An edit that adds an employee inserts only the new row, with `admin_notes: ''` as today.
+- An edit that removes an employee deletes only that employee's rows, by `id`.
+- Duplicate rows for one employee are all preserved when that employee survives and all deleted when
+  they do not. They are never collapsed — `appointment_employees` has no unique constraint on
+  `(appointment_id, employee_id)`, so duplicates exist and de-duplicating would be a silent delete.
+- The reconcile reads every row for the appointment with **no `is_archived` filter**, matching the
+  delete it replaces.
+- An empty submitted crew still removes every row, unchanged from today.
+- Proven in a browser: clock in and out, save an admin note, edit an unrelated field, and all four
+  values plus the row `id` survive.
+
+**Depends on**: nothing. **Independently shippable** — it needs neither the migration nor the status
+work. **Phase**: 5 (`05-02` · T1).
+
+---
+
+### REQ-027 — A cancelled appointment cannot be edited  ·  P0  ·  *(new 2026-09-22; GitHub issue #15; **SCHEDULED — Phase 5**)*
+
+The only server-side edit guard is `status === 'completed'` (`:648-653`), mirrored on the edit page
+(`appointments/[id]/edit/page.tsx:178-181`). A cancelled appointment is therefore freely editable,
+which is how an admin fixing a typo reached the REQ-026 defect in the issue's second repro.
+
+**Acceptance:**
+- `updateAppointment` refuses an appointment whose status is `cancelled`, in its own branch with its
+  own message naming the remedy (reopen first). The `completed` branch is unchanged.
+- The edit page renders an amber panel in place of the form for a cancelled appointment, matching
+  the existing completed panel's styling exactly.
+- The Edit control on the detail page still appears for every status; the refusal is explained on
+  arrival, which is this codebase's existing idiom.
+- Consequence, deliberate: `cancelled` has exactly one exit, the Reopen control, which REQ-025 makes
+  lossless. The form's status `<select>` can therefore no longer move a row out of `cancelled`, so
+  the marker needs clearing on exactly one path.
+
+**Depends on**: REQ-025 (the reopen path must be lossless before editing is blocked, or an admin who
+needs to change a cancelled appointment has no non-destructive route). **Phase**: 5 (`05-02`).
+
+---
+
+### REQ-028 — An appointment edit never silently overwrites a concurrent status change  ·  P0  ·  *(new 2026-09-22, **AMD-5** — added post-implementation to describe what shipped)*
+
+> **This requirement is an amendment, and it is the second kind: the implementation was right and
+> the spec was short.** Cause: the `/code-review high` pass run after `05-02-T1` landed. The
+> reviewer found a live lost-update on the form's cancel path; the fix was made and the `verifier`
+> confirmed it in round 2, then correctly flagged it as **scope beyond the REQ text as literally
+> written** — *"REQ-024's compare-and-set bullet is scoped explicitly to `cancelAppointment`;
+> REQ-025's acceptance says only that the marker must be 'written by both paths', with no
+> compare-and-set requirement for the `updateAppointment` path."* That reading is correct. The
+> shipped code is also correct. The gap was in the plan, and this requirement closes it.
+>
+> **Why a new REQ and not a widening of REQ-024 or REQ-025.** What shipped is broader than either
+> would honestly describe. `.eq('status', existingAppointment.status)` guards **every** non-`series`
+> edit, not only an edit that selects *Cancelled* — because the form always submits a `status`, an
+> edit that touches only the notes field will write the form's stale status back over a concurrent
+> change. Folding that into REQ-024 ("a cancellation never overwrites a completed appointment")
+> would misname it, and folding it into REQ-025 (which is about a column's contents) would make a
+> data requirement carry a concurrency rule. A separate ID also keeps the audit legible: REQ-024 and
+> REQ-025 were satisfied as written, and this is additional, traceable work.
+
+`updateAppointment` reads the appointment at `src/lib/actions/appointments.ts:633-638` and issues its
+`.update(...)` many statements later. Between the two, another tab — or the detail page's Cancel /
+Reopen controls, or a second admin — can change `status`. Without a status predicate on the update
+the stale form value wins, and the damage is exactly the damage this phase exists to prevent: an
+appointment marked `completed` in tab B is written back to `scheduled` by tab A's ordinary edit, and
+if tab A's edit selects *Cancelled* the row lands at `cancelled` with
+`status_before_cancel = 'scheduled'` — the completion destroyed **and** the new marker asserting a
+falsehood about what it replaced. `05-CONTEXT.md §2.9` establishes that `updateAppointment` is the
+second door into `cancelled`; this requirement is the guard on that door.
+
+**Acceptance:**
+- The appointment `.update(...)` in `updateAppointment`'s non-`series` branch carries
+  `.eq('status', existingAppointment.status)` alongside its existing `.eq('id', id)` and
+  `.eq('is_archived', false)` — a compare-and-set on the status read in that same action. It applies
+  to **every** non-`series` edit, not only to edits that set `cancelled`.
+- Concurrency proof, by SQL: with the edit form open on a `scheduled` appointment, set
+  `status = 'completed'` on that row directly, then submit the form. The stored `status` is still
+  `completed`, `status_before_cancel` is still NULL, and the submitted field values were **not**
+  written.
+- A zero-row update is **disambiguated before it is reported.** The action re-reads the row by `id`
+  and `is_archived = false`: if it still exists, the error is
+  `'The appointment changed while you were editing it. Refresh and try again.'`; only if it is gone
+  or archived is it `'Appointment not found.'` A lost update is never misreported as a missing
+  appointment.
+- That message is **visible to the admin** — unlike the detail page's refusals (KL-03). The edit
+  form is a Client Component using `useActionState` and rendering `state.error`
+  (`src/components/admin/appointment-form.tsx:85`, `:153-159`).
+- **Nothing downstream of the update runs when the guard does not match.** The assignment reconcile
+  (REQ-026), the `future`-scope regeneration and both `revalidatePath` calls all sit behind the
+  successful update, so a lost update changes no crew and no occurrence.
+- The `series` edit scope is **out of scope**: it updates `recurrence_series`, never the appointment
+  row, and has no status to compare.
+
+**Depends on**: REQ-025 (the marker this guard protects is written on this path). Shipped jointly
+with it. **Phase**: 5 (`05-02` · T1).
+
+---
+
 ## Coverage matrix
 
 | REQ | Phase | Plan · Task |
@@ -885,6 +1058,11 @@ and edit it — the admin cannot discover this from the screen.
 | REQ-002 (AMD-3 / AMD-3b) | 4 | 04-01 · T2 — Branch B in force, narrowed to `is_archived` with no invoice-status predicate, both invariants together (D-25). |
 | REQ-018 (AMD-4) | 4 | 04-02 · T1 — the `voidInvoice` clause of REQ-018's acceptance is split; archive/restore/issue unchanged (D-24). |
 | REQ-023 | 3 | 03-02 · T1 (partial unique index on `client_job_pricing`) |
+| REQ-024 | **5** | **SCHEDULED 2026-09-22 as GitHub issue #15.** 05-02 · T1 (the refusal in `cancelAppointment` + its compare-and-set), T2 (the hidden Cancel control). The *form* path's compare-and-set is **REQ-028**, not this row (AMD-5). |
+| REQ-025 | **5** | 05-01 · T1 (column + two CHECKs + `database.ts`); 05-02 · T1 (written on both cancel paths, read and cleared by `uncancelAppointment`). **Neither half PASSes alone.** The marker's *truthfulness* on the `updateAppointment` path rests on REQ-028 (AMD-5). |
+| REQ-026 | **5** | 05-02 · T1 (the `appointment_employees` reconcile). Independently shippable — needs no migration. |
+| REQ-027 | **5** | 05-02 · T1 (server guard), T2 (edit-page panel). |
+| **REQ-028** | **5** | **AMD-5, added 2026-09-22 after implementation** (cause: `/code-review high`; confirmed by the verifier as scope beyond the REQ text as written). 05-02 · T1 — `.eq('status', existingAppointment.status)` on `updateAppointment`'s appointment update, plus the disambiguating re-read that distinguishes a lost update from a missing row. **Already shipped and verified;** no new task. |
 
 REQ-019 and REQ-020 are jointly delivered by both `01-03` tasks and **neither can PASS alone**: T1
 lands the views and drops the policies, T2 re-points the three employee queries through them. Between
@@ -935,6 +1113,42 @@ and a permanently two-branch resolver to serve a case nobody has yet reported ha
 
 **What would make this a real requirement.** An admin asking for it, or a signed client contract
 with a fixed per-visit price and a variable visit length. Until then it is a limitation, not a gap.
+
+### KL-03 — Every refusal on the appointment **detail** page is invisible  *(new 2026-09-22, Phase 5)*
+
+**What happens.** The appointment detail page's Cancel and Reopen controls are `'use server'`
+wrapper functions that **discard the action's return value**
+(`src/app/(internal)/solutions/(admin)/appointments/[id]/page.tsx:157-167`). Every error string
+Phase 5 added on those two paths is therefore never displayed. The admin sees a click that does
+nothing:
+
+- `'A completed appointment cannot be cancelled. Completed is a final status.'`
+- `'This appointment is already cancelled.'` / `'This appointment is not cancelled.'` — the
+  double-submit refusals, reachable from a stale page.
+- `'The appointment changed while you were cancelling it. Refresh and try again.'` and the same for
+  reopening — the REQ-024 / REQ-025 race messages.
+
+**Why it was not fixed.** `05-CONTEXT.md §5` and `05-02-PLAN.md` T2's out-of-scope list put
+converting that page to a Client Component with `useActionState` explicitly out of scope, and D-37
+decided the `completed` case by **hiding** the Cancel control rather than reporting a refusal — the
+`COMPLETED` badge a few inches away is the explanation, and a disabled-looking button would read as
+a broken page. The server guards stay regardless: their job is to prevent the write from a stale
+page or a replayed submission, not to narrate it.
+
+**What it costs.** For the `completed` case, nothing — the control is not rendered, so the refusal
+is unreachable from the UI. For the remaining cases the cost is a silent no-op: a double-submitted
+Cancel, or a Cancel losing a race with another tab, looks like a click that did not register. The
+write is correctly refused either way; only the explanation is missing.
+
+**This limitation does not extend to the edit page.** `updateAppointment`'s refusals — the
+`completed` guard, REQ-027's `cancelled` guard and REQ-028's "changed while you were editing it" —
+are all displayed, because `appointment-form.tsx` is a Client Component that renders `state.error`
+(`:85`, `:153-159`).
+
+**Reversal path.** Convert `appointments/[id]/page.tsx` to a Client Component (or extract the two
+control forms into one), hold the action results in `useActionState`, and render the error beside
+the control. It is a self-contained change to one file and needs no schema, action or requirement
+change. Worth its own issue rather than a Phase 5 task.
 
 ### KL-02 — Employees see no earnings figure at all
 
